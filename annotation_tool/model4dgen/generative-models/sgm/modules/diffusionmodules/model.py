@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 # pytorch_diffusion + derived encoder decoder
 import logging
 import math
@@ -208,7 +209,6 @@ class MemoryEfficientAttnBlock(nn.Module):
     Note: this is a single-head self-attention operation
     """
 
-    #
     def __init__(self, in_channels):
         super().__init__()
         self.in_channels = in_channels
@@ -432,7 +432,6 @@ class Model(nn.Module):
         )
 
     def forward(self, x, t=None, context=None):
-        # assert x.shape[2] == x.shape[3] == self.resolution
         if context is not None:
             # assume aligned context, cat along channel axis
             x = torch.cat((x, context), dim=1)
@@ -713,7 +712,6 @@ class Decoder(nn.Module):
         return self.conv_out.weight
 
     def forward(self, z, **kwargs):
-        # assert z.shape[1:] == self.z_shape[1:]
         self.last_z_shape = z.shape
 
         # timestep embedding

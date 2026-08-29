@@ -1,0 +1,29 @@
+name: Publication checks
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  publication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install pytest
+      - run: >-
+          pytest -q
+          annotation_tool/tests/test_publication_check.py
+          annotation_tool/tests/test_external_dependencies.py
+          annotation_tool/tests/test_documented_commands.py
+          annotation_tool/tests/test_frontend_security.py
+          annotation_tool/tests/test_http_security.py
+      - run: >-
+          python annotation_tool/scripts/check_publication.py
+          README.md docs/ui_README.md docs/ui_README_ch.md annotation_tool asset
+      - run: >-
+          python -m compileall -q
+          -x '(^|/)(thirdparty|tmp|checkpoints|\.cache)(/|$)'
+          annotation_tool

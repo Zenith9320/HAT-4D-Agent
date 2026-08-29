@@ -36,7 +36,7 @@ from .L4GM_MoGA.core.options_conf import config_defaults
 from .L4GM_MoGA.core_free_fn.models import LGM
 from .L4GM_MoGA.mvdream.pipeline_mvdream import MVDreamPipeline
 from .L4GM_MoGA.core.options_conf import Options
-from .L4GM_MoGA.utils.train_utils import seed_everything
+from .runtime_utils import seed_everything
 from .L4GM_MoGA.core.gs import GaussianRenderer
 from .L4GM_MoGA.utils.gpu_utils import print_gpu_memory
 
@@ -50,10 +50,8 @@ def _rgba_to_rgb_with_white_bg(image_path: Path) -> np.ndarray:
     img = Image.open(image_path).convert("RGBA")
     rgba = np.array(img, dtype=np.uint8)
     # Pad RGBA to square with transparent background (alpha=0).
-    # Image.fromarray(rgba).save("./tmp/" + (f"{image_path.stem}_pad_before.png"))
 
     rgba = _pad_to_square_rgba_np(rgba)
-    # Image.fromarray(rgba).save("./tmp/" + (f"{image_path.stem}_pad_before.png"))
     alpha = rgba[:, :, 3].astype(np.float32) / 255.0
     rgb = rgba[:, :, :3].astype(np.float32)
     rgb = rgb * alpha[..., None] + 255.0 * (1.0 - alpha[..., None])
@@ -196,12 +194,9 @@ class L4GMGenerator:
 
         with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
 
-            # --------------------------------------------------
             # build minimal gaussian: [1, 1, 14]
-            # --------------------------------------------------
             gaussians = torch.zeros((1, 1, 14), device=device, dtype=torch.float32)
 
-            # xyz (in front of camera)
             gaussians[..., 0:3] = torch.tensor([[0.0, 0.0, 2.0]], device=device)
 
             # opacity
@@ -210,15 +205,11 @@ class L4GMGenerator:
             # scale
             gaussians[..., 4:7] = 0.05
 
-            # quaternion (identity, wxyz)
             gaussians[..., 7:11] = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=device)
 
-            # rgb (red point)
             gaussians[..., 11:14] = torch.tensor([[1.0, 0.0, 0.0]], device=device)
 
-            # --------------------------------------------------
             # build camera
-            # --------------------------------------------------
             cam_poses = torch.from_numpy(
                 orbit_camera(0, 0, radius=opt.cam_radius, opengl=True)
             ).unsqueeze(0).to(device)
@@ -231,9 +222,7 @@ class L4GMGenerator:
 
             bg_color = torch.tensor([1.0, 1.0, 1.0], device=device)
 
-            # --------------------------------------------------
             # trigger rasterization (CUDA compile happens here)
-            # --------------------------------------------------
             _ = self.model.gs.render(
                 gaussians,
                 cam_view.unsqueeze(0),        # [B=1, V=1, 4,4]
@@ -308,9 +297,6 @@ class L4GMGenerator:
             default_root=ROOT.parent / "workspace",
             create=True,
         )
-        # in_path = tmp_dir / f"input_{int(time.time()*1000)}.png"
-        # img = (rgb * 255.0).clip(0, 255).astype(np.uint8)
-        # PILImage.fromarray(img).save(in_path)
 
         in_path = Path(rgba_path)
 
@@ -812,7 +798,6 @@ class L4GMGenerator:
 
         gaussians_aligned = self._rotate_gaussians_y(gaussians, best_azimuth)
 
-        # self._save_ply(gaussians, out_ply)
         self._save_ply(gaussians_aligned, out_ply)
         print_gpu_memory()
         return {

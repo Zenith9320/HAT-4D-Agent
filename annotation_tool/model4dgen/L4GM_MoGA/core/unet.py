@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 # SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -60,17 +61,16 @@ class MVAttention(nn.Module):
     def forward(self, x, return_attn=False):
         # x: [B*T*V, C, H, W]
         BTV, C, H, W = x.shape
-        BT = BTV // self.num_views # assert BV % self.num_views == 0
+        BT = BTV // self.num_views
 
         res = x
         x = self.norm(x)
 
-        # Jiaxin: 这里是对 V, H，W 看做整体，进行 self-attention
         x = x.reshape(BT, self.num_views, C, H, W).permute(0, 1, 3, 4, 2).contiguous().reshape(BT, -1, C).contiguous()
         if not return_attn:
             x = self.attn(x, return_attn=False) 
         else:
-            x, atten_weight = self.attn(x, return_attn=True, num_frames=self.num_views) # 四个视角
+            x, atten_weight = self.attn(x, return_attn=True, num_frames=self.num_views)
         x = x.reshape(BT, self.num_views, H, W, C).permute(0, 1, 4, 2, 3).contiguous().reshape(BTV, C, H, W).contiguous()
 
 
@@ -82,7 +82,6 @@ class MVAttention(nn.Module):
             return x, atten_weight
 
 
-# class TempSpatialSVG2(nn.Module):
     
 
 class TempAttention(nn.Module):
@@ -114,7 +113,7 @@ class TempAttention(nn.Module):
     def forward(self, x, return_attn=False,attn_resize: Optional[Tuple[int, int]] = None, zero_out_cross_frame=False):
         # x: [B*T*V, C, H, W]
         BTV, C, H, W = x.shape
-        BV = BTV // self.num_frames # assert BV % self.num_views == 0
+        BV = BTV // self.num_frames
         B = BV // self.num_views
 
         res = x
@@ -247,7 +246,6 @@ class DownBlock(nn.Module):
         print(f"in downblock forward x_shape:",x.shape)
 
         for attn, t_attn, net in zip(self.attns, self.t_attns, self.nets):
-            # print("x.shape:", x.shape)
             
             x = net(x)
             if attn:
@@ -275,77 +273,59 @@ class DownBlock(nn.Module):
         L = T * V 
         B = BTV // T // V
         
-        # print("rollout shape:", (B,L,L))
         
         rollout = torch.eye(L, device=x.device).unsqueeze(0).repeat(B, 1, 1)  # [B, L, L]
-        rollout = rollout / rollout.sum(dim=-1, keepdim=True)  # 可选
+        rollout = rollout / rollout.sum(dim=-1, keepdim=True)
     
         for attn, t_attn, net in zip(self.attns, self.t_attns, self.nets):
             x = net(x)
             if attn:
                 x, mv_attn_map = attn(x, return_attn=True)  # mv_attn_map: [BT, H, V, V]
-                # print("mv_attn_map:", mv_attn_map.shape)
                 mv_attn_map = torch.mean(mv_attn_map, dim=1)
                 mv_attn_map = torch.reshape(mv_attn_map, (B, T,V,V ))
-                # x = attn(x)
                 
                 
-                #%%%%%%%%%%%%%%%%%%%%%% 
                                 
                 visualize_attention_heatmap(
-                    mv_attn_map[:, 0],  # 取第一个时间步 T=0，形状 [B, V, V] -> [B, V, V]
+                    mv_attn_map[:, 0],
                     title="mv_attn_map - T0",
                     filename="mv_attn_map_T0.png"
                 )
-                # %%%%%%%%%%%%%%%%%%%
                 mv_rollout = torch.zeros(B, L, L, device=x.device)
                 for t in range(T):
                     idx_t = torch.arange(t * V , (t + 1) * V , device=x.device)
                     mv_rollout[:, idx_t[:, None], idx_t[None, :]] = mv_attn_map[:, t]
                     
-                # print("mv_rollout:", mv_rollout)
                 
                 
-                # %%%%%%%%%%%%%%%%%%%%%
                 visualize_attention_heatmap(
                     mv_rollout,  # [B, L, L]
                     title="mv_rollout",
                     filename="mv_rollout.png"
                 )
                 
-                # %%%%%%%%%%%%%%%%
-                mv_rollout = mv_rollout / mv_rollout.sum(dim=-1,keepdim=True) # 可选
+                mv_rollout = mv_rollout / mv_rollout.sum(dim=-1,keepdim=True)
                 
-                rollout = torch.bmm(rollout, mv_rollout)  # 跨视角信息传播
-                # 改成下面的操作
-                # rollout = torch.log(rollout + 1e-6)
-                # rollout = rollout + torch.log(mv_rollout + 1e-6)
-                # rollout = torch.exp(rollout)
-                rollout = rollout / rollout.sum(dim=-1, keepdim=True)  # 可选
+                rollout = torch.bmm(rollout, mv_rollout)
+                rollout = rollout / rollout.sum(dim=-1, keepdim=True)
 
-                # %%%%%%%%%%%%%%%%%%%%%%%%%%%
-                # 可视化最终 rollout
                 visualize_attention_heatmap(
                     rollout,  # [B, L, L]
                     title="final_rollout",
                     filename="after_mv_final_rollout.png"
                 )
-                # %%%%%%%%%%%%%%%%%%%%%%%%%%%
                 
             if t_attn:
                 x, temp_attn_map = t_attn(x, return_attn=True)  # [B, V, THW, THW]
                 temp_attn_map = torch.mean(temp_attn_map, dim=1)
                 temp_attn_map = torch.reshape(temp_attn_map, (B, V,T,T ))
                 
-                # %%%%%%%%%%%%%%%%%%%%%%%%%%%
                 visualize_attention_heatmap(
-                    temp_attn_map[:, 0],  # 取第一个视角 V=0，形状 [B, T, T]
+                    temp_attn_map[:, 0],
                     title="temp_attn_map - V0",
                     filename="temp_attn_map_V0.png"
                 )
                 
-                # %%%%%%%%%%%%%%%%%%%%%%%%%%%
-                # x = t_attn(x)
                 temp_rollout = torch.zeros(B, L, L, device=x.device)
                     
                 for v in range(V):
@@ -356,38 +336,26 @@ class DownBlock(nn.Module):
                     idx_v = torch.cat(idx_v, dim=0)  # [THW]
                     
 
-                    # print("idx_v:" , idx_v)
                     temp_rollout[:, idx_v[:, None], idx_v[None, :]] = temp_attn_map[:, v]
-                    # %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-                    # 可视化 temp_rollout
-                    # print("temp_attn_map:", torch.unique(temp_attn_map))
-                    # print("temp_rollout:", torch.unique(temp_rollout))
      
                     visualize_attention_heatmap(
                         temp_rollout,  # [B, L, L]
                         title="temp_rollout",
                         filename="temp_rollout.png"
                     )
-                    # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
                                     
 
-                temp_rollout = temp_rollout / temp_rollout.sum(dim=-1,keepdim=True) # 可选
+                temp_rollout = temp_rollout / temp_rollout.sum(dim=-1,keepdim=True)
                     
-                rollout = torch.bmm(rollout, temp_rollout)  # 跨时间信息传播
+                rollout = torch.bmm(rollout, temp_rollout)
                 
-                # rollout = torch.log(rollout + 1e-6)
-                # rollout = rollout + torch.log(temp_rollout + 1e-6)
-                # rollout = torch.exp(rollout)
-                rollout = rollout / rollout.sum(dim=-1, keepdim=True)  # 可选
+                rollout = rollout / rollout.sum(dim=-1, keepdim=True)
         
-                # %%%%%%%%%%%%%%%%%%%%%%%%%%%
-                # 可视化最终 rollout
                 visualize_attention_heatmap(
                     rollout,  # [B, L, L]
                     title="final_rollout",
                     filename="after_temp_final_rollout.png"
                 )
-                # %%%%%%%%%%%%%%%%%%%%%%%%%%%
                 
                 
             xs.append(x)
@@ -484,12 +452,10 @@ class UpBlock(nn.Module):
         if upsample:
             self.upsample = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
-    # def forward(self, x, xs):
 
 
     def forward(self, x, xs, return_attn=False, attn_hook=None,attn_resize: Optional[Tuple[int, int]] = None, zero_out_cross_frame=False):
         # attn_hook: callable, (attn_weights: Tensor, layer_index: int) -> None
-        # Modified By Jiaxin, Add viz temporal attention
         
         temp_attn_weights = []
         view_attn_weights = []
@@ -503,7 +469,6 @@ class UpBlock(nn.Module):
 
             if attn:
                 if return_attn:
-                # if False:
                     x, attn_weights = attn(x, return_attn=True)
                     view_attn_weights.append(attn_weights)
                     
@@ -520,8 +485,6 @@ class UpBlock(nn.Module):
                     print(f"{i}-th t_attn num_frames:", t_attn.num_frames)
                     temp_attn_weights.append(attn_weights)
                     
-                    # print('temp_attn_weights:', temp_attn_weights)
-                    # print("[SHAPE] attn_weights in Upblock:", attn_weights)
                     if attn_hook is not None:
                         attn_hook(attn_weights, i)  # external hook to process weights
                 else:
@@ -587,7 +550,7 @@ class UNet(nn.Module):
         for i in range(len(up_channels)):
             cin = cout
             cout = up_channels[i]
-            cskip = down_channels[max(-2 - i, -len(down_channels))] # for assymetric
+            cskip = down_channels[max(-2 - i, -len(down_channels))]
 
             up_blocks.append(UpBlock(
                 cin, cskip, cout, 
@@ -605,10 +568,6 @@ class UNet(nn.Module):
         self.norm_out = nn.GroupNorm(num_channels=up_channels[-1], num_groups=32, eps=1e-5)
         self.conv_out = nn.Conv2d(up_channels[-1], out_channels, kernel_size=3, stride=1, padding=1)
         
-    # def viz_temporal_attention(self, temporal_atten_weight):
-    #     print(f"[LEN] temporal_atten_weight: {len(temporal_atten_weight)}")
-    #     print(f"[SHAPE] temporal_atten_weight[0]: {temporal_atten_weight[0].shape}")
-    #     # [B (4) , H(16) , T , T]
     
             
     def viz_view_attention(self, views_atten_weight, save_dir='views_attn_vis'):
@@ -621,7 +580,6 @@ class UNet(nn.Module):
         for layer_idx, layer_attn in enumerate(views_atten_weight):
             B, H, V, _ = layer_attn.shape
             
-            # 对 H（注意力头）维度求平均: [B, H, V, V] -> [B, V, V]
             mean_attn = layer_attn.mean(dim=1)
 
             for b in range(B):
@@ -638,7 +596,6 @@ class UNet(nn.Module):
                 plt.savefig(save_path)
                 plt.close()
 
-                # print(f"[SAVED] Attention map saved to: {save_path}")
                 
 
     def viz_temporal_attention(self, temporal_atten_weight, save_dir='temp_attn_vis'):
@@ -651,7 +608,6 @@ class UNet(nn.Module):
         for layer_idx, layer_attn in enumerate(temporal_atten_weight):
             B, H, T, _ = layer_attn.shape
             
-            # 对 H（注意力头）维度求平均: [B, H, T, T] -> [B, T, T]
             mean_attn = layer_attn.mean(dim=1)
 
             for b in range(B):
@@ -668,7 +624,6 @@ class UNet(nn.Module):
                 plt.savefig(save_path)
                 plt.close()
 
-                # print(f"[SAVED] Attention map saved to: {save_path}")
                 
     def save_temporal_attention(self, temporal_atten_weight, save_dir="temp_attn_torch", start_t=0, end_t=1, layer_id=0, back=False, back_num=0):
         
@@ -677,7 +632,6 @@ class UNet(nn.Module):
         else: 
             attn_save_path = os.path.join(save_dir, f'temporal_atten_from_{back_num - start_t}_to_{back_num - end_t}_layer{layer_id}.pt')
         torch.save(temporal_atten_weight, attn_save_path)
-        # print(f"[SAVED] Temporal attention weights saved to: {attn_save_path}")
         
     def save_view_attention(self, cross_atten_weight, save_dir="cross_view_attn_torch", start_t=0, end_t=1, layer_id=0, back=False, back_num=0):
        
@@ -686,7 +640,6 @@ class UNet(nn.Module):
         else: 
             attn_save_path = os.path.join(save_dir, f'cross_view_atten_from_{back_num - start_t}_to_{back_num - end_t}_layer{layer_id}.pt')
         torch.save(cross_atten_weight, attn_save_path)
-        # print(f"[SAVED] Cross-View attention weights saved to: {attn_save_path}")
         
     def save_rollout_attention(self, rollout_atten_weight, save_dir="rollout_attn_torch", start_t=0, end_t=1, layer_id=0, back=False, back_num=0):
         
@@ -710,9 +663,7 @@ class UNet(nn.Module):
         xss = [x]
         if downblock_rollout:
             BTV, C, H, W = x.shape
-            # print("downblock x_shape:", x.shape)
             L = BTV 
-            # print("L:" , L)
             
             rollout = torch.eye(L, device=x.device).unsqueeze(0).repeat(B, 1, 1)  # [B, L, L]
         
@@ -723,10 +674,8 @@ class UNet(nn.Module):
                 print("rollout:" , rollout.shape)
                 
                 rollout = torch.bmm(rollout, rollout_block)
-                # rollout = rollout / rollout.sum(dim=-1, keepdim=True)
                 self.save_rollout_attention(rollout, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=bid, back=back,back_num= back_num)
                 
-                # print("after downblock:" , rollout.shape)
     
         else:
             for block in self.down_blocks:
@@ -747,7 +696,6 @@ class UNet(nn.Module):
             print("x.shape:", x.shape)
             print("mid_feature[0]:",  mid_feature[0].shape)
             
-            # 保存正逆向的中间特征
             save_feature_dir = os.environ.get("L4GM_MID_FEATURE_DIR")
             if save_feature_dir:
                 os.makedirs(save_feature_dir, exist_ok=True)
@@ -771,15 +719,10 @@ class UNet(nn.Module):
                 print(f"xss[{idx}]:" , xss[idx].shape)
                 print(f"xss[{idx}]:" ,  mid_feature[1][idx].shape)
                 xss[idx] =  mid_add_alpha * mid_feature[1][idx]  + (1- mid_add_alpha)  * xss[idx]
-            # xss =
             
         
 
         # # up
-        # for block in self.up_blocks:
-        #     xs = xss[-len(block.nets):]
-        #     xss = xss[:-len(block.nets)]
-        #     x = block(x, xs)
             
         # up, Modified By jiaxin, Add viz
         print("[SHAPE] Upblocks:", len(self.up_blocks))
@@ -789,9 +732,8 @@ class UNet(nn.Module):
             xs = xss[-len(block.nets):]
             xss = xss[:-len(block.nets)]
 
-            # 如果是最后一层，并设置了可视化
             if viz_last_up_attention and i == len(self.up_blocks) - 3:
-                x, temp_attn_weights,view_attn_weights = block(x, xs, return_attn=True, attn_resize= viz_atten_size )  # 假设你修改了 block 支持返回 attn
+                x, temp_attn_weights,view_attn_weights = block(x, xs, return_attn=True, attn_resize= viz_atten_size )
                 self.viz_temporal_attention(temp_attn_weights)
                 self.save_temporal_attention(temp_attn_weights, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=i, back=back,back_num= back_num)
                 
@@ -867,7 +809,7 @@ class UNet_CAG(nn.Module):
         for i in range(len(up_channels)):
             cin = cout
             cout = up_channels[i]
-            cskip = down_channels[max(-2 - i, -len(down_channels))] # for assymetric
+            cskip = down_channels[max(-2 - i, -len(down_channels))]
 
             up_blocks.append(UpBlock(
                 cin, cskip, cout, 
@@ -885,10 +827,6 @@ class UNet_CAG(nn.Module):
         self.norm_out = nn.GroupNorm(num_channels=up_channels[-1], num_groups=32, eps=1e-5)
         self.conv_out = nn.Conv2d(up_channels[-1], out_channels, kernel_size=3, stride=1, padding=1)
         
-    # def viz_temporal_attention(self, temporal_atten_weight):
-    #     print(f"[LEN] temporal_atten_weight: {len(temporal_atten_weight)}")
-    #     print(f"[SHAPE] temporal_atten_weight[0]: {temporal_atten_weight[0].shape}")
-    #     # [B (4) , H(16) , T , T]
     
             
     def viz_view_attention(self, views_atten_weight, save_dir='views_attn_vis'):
@@ -901,7 +839,6 @@ class UNet_CAG(nn.Module):
         for layer_idx, layer_attn in enumerate(views_atten_weight):
             B, H, V, _ = layer_attn.shape
             
-            # 对 H（注意力头）维度求平均: [B, H, V, V] -> [B, V, V]
             mean_attn = layer_attn.mean(dim=1)
 
             for b in range(B):
@@ -918,7 +855,6 @@ class UNet_CAG(nn.Module):
                 plt.savefig(save_path)
                 plt.close()
 
-                # print(f"[SAVED] Attention map saved to: {save_path}")
                 
 
     def viz_temporal_attention(self, temporal_atten_weight, save_dir='temp_attn_vis'):
@@ -931,7 +867,6 @@ class UNet_CAG(nn.Module):
         for layer_idx, layer_attn in enumerate(temporal_atten_weight):
             B, H, T, _ = layer_attn.shape
             
-            # 对 H（注意力头）维度求平均: [B, H, T, T] -> [B, T, T]
             mean_attn = layer_attn.mean(dim=1)
 
             for b in range(B):
@@ -948,7 +883,6 @@ class UNet_CAG(nn.Module):
                 plt.savefig(save_path)
                 plt.close()
 
-                # print(f"[SAVED] Attention map saved to: {save_path}")
                 
     def save_temporal_attention(self, temporal_atten_weight, save_dir="temp_attn_torch", start_t=0, end_t=1, layer_id=0, back=False, back_num=0):
         
@@ -957,7 +891,6 @@ class UNet_CAG(nn.Module):
         else: 
             attn_save_path = os.path.join(save_dir, f'temporal_atten_from_{back_num - start_t}_to_{back_num - end_t}_layer{layer_id}.pt')
         torch.save(temporal_atten_weight, attn_save_path)
-        # print(f"[SAVED] Temporal attention weights saved to: {attn_save_path}")
         
     def save_view_attention(self, cross_atten_weight, save_dir="cross_view_attn_torch", start_t=0, end_t=1, layer_id=0, back=False, back_num=0):
        
@@ -966,7 +899,6 @@ class UNet_CAG(nn.Module):
         else: 
             attn_save_path = os.path.join(save_dir, f'cross_view_atten_from_{back_num - start_t}_to_{back_num - end_t}_layer{layer_id}.pt')
         torch.save(cross_atten_weight, attn_save_path)
-        # print(f"[SAVED] Cross-View attention weights saved to: {attn_save_path}")
         
     def save_rollout_attention(self, rollout_atten_weight, save_dir="rollout_attn_torch", start_t=0, end_t=1, layer_id=0, back=False, back_num=0):
         
@@ -993,9 +925,7 @@ class UNet_CAG(nn.Module):
         
         if downblock_rollout:
             BTV, C, H, W = x.shape
-            # print("downblock x_shape:", x.shape)
             L = BTV 
-            # print("L:" , L)
             
             rollout = torch.eye(L, device=x.device).unsqueeze(0).repeat(B, 1, 1)  # [B, L, L]
         
@@ -1006,10 +936,8 @@ class UNet_CAG(nn.Module):
                 print("rollout:" , rollout.shape)
                 
                 rollout = torch.bmm(rollout, rollout_block)
-                # rollout = rollout / rollout.sum(dim=-1, keepdim=True)
                 self.save_rollout_attention(rollout, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=bid, back=back,back_num= back_num)
                 
-                # print("after downblock:" , rollout.shape)
     
         else:
             for block in self.down_blocks:
@@ -1021,11 +949,9 @@ class UNet_CAG(nn.Module):
                 
         
                 
-        if downblock_rollout: # 这一步返回的是 没有zero_out的atten
+        if downblock_rollout:
             BTV, C, H, W = x_zero_out.shape
-            # print("downblock x_shape:", x.shape)
             L = BTV 
-            # print("L:" , L)
             
             rollout = torch.eye(L, device=x_zero_out.device).unsqueeze(0).repeat(B, 1, 1)  # [B, L, L]
         
@@ -1036,10 +962,8 @@ class UNet_CAG(nn.Module):
                 print("rollout:" , rollout.shape)
                 
                 rollout = torch.bmm(rollout, rollout_block)
-                # rollout = rollout / rollout.sum(dim=-1, keepdim=True)
                 self.save_rollout_attention(rollout, save_atten_dir + "_zero_out",start_t=start_t, end_t=end_t, layer_id=bid, back=back,back_num= back_num)
                 
-                # print("after downblock:" , rollout.shape)
     
         else:
             for block in self.down_blocks:
@@ -1048,7 +972,6 @@ class UNet_CAG(nn.Module):
                 xss_zero_out.extend(xs_zero_out)
         
         
-        # print("x-x_zero_out / x :" , torch.unique((x-x_zero_out) / x))
                 
         x = x + zero_out_epsilon * (x - x_zero_out)
         
@@ -1068,7 +991,6 @@ class UNet_CAG(nn.Module):
             print("x.shape:", x.shape)
             print("mid_feature[0]:",  mid_feature[0].shape)
             
-            # 保存正逆向的中间特征
             save_feature_dir = os.environ.get("L4GM_MID_FEATURE_DIR")
             if save_feature_dir:
                 os.makedirs(save_feature_dir, exist_ok=True)
@@ -1092,15 +1014,10 @@ class UNet_CAG(nn.Module):
                 print(f"xss[{idx}]:" , xss[idx].shape)
                 print(f"xss[{idx}]:" ,  mid_feature[1][idx].shape)
                 xss[idx] =  mid_add_alpha * mid_feature[1][idx]  + (1- mid_add_alpha)  * xss[idx]
-            # xss =
             
         
 
         # # up
-        # for block in self.up_blocks:
-        #     xs = xss[-len(block.nets):]
-        #     xss = xss[:-len(block.nets)]
-        #     x = block(x, xs)
             
         # up, Modified By jiaxin, Add viz
         print("[SHAPE] Upblocks:", len(self.up_blocks))
@@ -1110,9 +1027,8 @@ class UNet_CAG(nn.Module):
             xs = xss[-len(block.nets):]
             xss = xss[:-len(block.nets)]
 
-            # 如果是最后一层，并设置了可视化
             if viz_last_up_attention and i == len(self.up_blocks) - 3:
-                x, temp_attn_weights,view_attn_weights = block(x, xs, return_attn=True, attn_resize= viz_atten_size )  # 假设你修改了 block 支持返回 attn
+                x, temp_attn_weights,view_attn_weights = block(x, xs, return_attn=True, attn_resize= viz_atten_size )
                 self.viz_temporal_attention(temp_attn_weights)
                 self.save_temporal_attention(temp_attn_weights, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=i, back=back,back_num= back_num)
                 
@@ -1187,7 +1103,7 @@ class UNet_CAG_UpBlock(nn.Module):
         for i in range(len(up_channels)):
             cin = cout
             cout = up_channels[i]
-            cskip = down_channels[max(-2 - i, -len(down_channels))] # for assymetric
+            cskip = down_channels[max(-2 - i, -len(down_channels))]
 
             up_blocks.append(UpBlock(
                 cin, cskip, cout, 
@@ -1205,10 +1121,6 @@ class UNet_CAG_UpBlock(nn.Module):
         self.norm_out = nn.GroupNorm(num_channels=up_channels[-1], num_groups=32, eps=1e-5)
         self.conv_out = nn.Conv2d(up_channels[-1], out_channels, kernel_size=3, stride=1, padding=1)
         
-    # def viz_temporal_attention(self, temporal_atten_weight):
-    #     print(f"[LEN] temporal_atten_weight: {len(temporal_atten_weight)}")
-    #     print(f"[SHAPE] temporal_atten_weight[0]: {temporal_atten_weight[0].shape}")
-    #     # [B (4) , H(16) , T , T]
     
             
     def viz_view_attention(self, views_atten_weight, save_dir='views_attn_vis'):
@@ -1221,7 +1133,6 @@ class UNet_CAG_UpBlock(nn.Module):
         for layer_idx, layer_attn in enumerate(views_atten_weight):
             B, H, V, _ = layer_attn.shape
             
-            # 对 H（注意力头）维度求平均: [B, H, V, V] -> [B, V, V]
             mean_attn = layer_attn.mean(dim=1)
 
             for b in range(B):
@@ -1238,7 +1149,6 @@ class UNet_CAG_UpBlock(nn.Module):
                 plt.savefig(save_path)
                 plt.close()
 
-                # print(f"[SAVED] Attention map saved to: {save_path}")
                 
 
     def viz_temporal_attention(self, temporal_atten_weight, save_dir='temp_attn_vis'):
@@ -1251,7 +1161,6 @@ class UNet_CAG_UpBlock(nn.Module):
         for layer_idx, layer_attn in enumerate(temporal_atten_weight):
             B, H, T, _ = layer_attn.shape
             
-            # 对 H（注意力头）维度求平均: [B, H, T, T] -> [B, T, T]
             mean_attn = layer_attn.mean(dim=1)
 
             for b in range(B):
@@ -1268,7 +1177,6 @@ class UNet_CAG_UpBlock(nn.Module):
                 plt.savefig(save_path)
                 plt.close()
 
-                # print(f"[SAVED] Attention map saved to: {save_path}")
                 
     def save_temporal_attention(self, temporal_atten_weight, save_dir="temp_attn_torch", start_t=0, end_t=1, layer_id=0, back=False, back_num=0):
         
@@ -1277,7 +1185,6 @@ class UNet_CAG_UpBlock(nn.Module):
         else: 
             attn_save_path = os.path.join(save_dir, f'temporal_atten_from_{back_num - start_t}_to_{back_num - end_t}_layer{layer_id}.pt')
         torch.save(temporal_atten_weight, attn_save_path)
-        # print(f"[SAVED] Temporal attention weights saved to: {attn_save_path}")
         
     def save_view_attention(self, cross_atten_weight, save_dir="cross_view_attn_torch", start_t=0, end_t=1, layer_id=0, back=False, back_num=0):
        
@@ -1286,7 +1193,6 @@ class UNet_CAG_UpBlock(nn.Module):
         else: 
             attn_save_path = os.path.join(save_dir, f'cross_view_atten_from_{back_num - start_t}_to_{back_num - end_t}_layer{layer_id}.pt')
         torch.save(cross_atten_weight, attn_save_path)
-        # print(f"[SAVED] Cross-View attention weights saved to: {attn_save_path}")
         
     def save_rollout_attention(self, rollout_atten_weight, save_dir="rollout_attn_torch", start_t=0, end_t=1, layer_id=0, back=False, back_num=0):
         
@@ -1313,9 +1219,7 @@ class UNet_CAG_UpBlock(nn.Module):
         
         if downblock_rollout:
             BTV, C, H, W = x.shape
-            # print("downblock x_shape:", x.shape)
             L = BTV 
-            # print("L:" , L)
             
             rollout = torch.eye(L, device=x.device).unsqueeze(0).repeat(B, 1, 1)  # [B, L, L]
         
@@ -1326,10 +1230,8 @@ class UNet_CAG_UpBlock(nn.Module):
                 print("rollout:" , rollout.shape)
                 
                 rollout = torch.bmm(rollout, rollout_block)
-                # rollout = rollout / rollout.sum(dim=-1, keepdim=True)
                 self.save_rollout_attention(rollout, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=bid, back=back,back_num= back_num)
                 
-                # print("after downblock:" , rollout.shape)
     
         else:
             for block in self.down_blocks:
@@ -1337,40 +1239,17 @@ class UNet_CAG_UpBlock(nn.Module):
                 x, xs = block(x)
                 xss.extend(xs)
                 
-        # print("--------------Begin Zero Out --------------")
                 
         
                 
-        # if downblock_rollout: # 这一步返回的是 没有zero_out的atten
-        #     BTV, C, H, W = x_zero_out.shape
-        #     # print("downblock x_shape:", x.shape)
-        #     L = BTV 
-        #     # print("L:" , L)
             
-        #     rollout = torch.eye(L, device=x_zero_out.device).unsqueeze(0).repeat(B, 1, 1)  # [B, L, L]
         
-        #     for bid, block in enumerate(self.down_blocks):
-        #         x_zero_out, xs_zero_out, rollout_block = block(x_zero_out, attn_rollout=True, zero_out_cross_frame=True)
-        #         xss_zero_out.extend(xs_zero_out)
-        #         print("rollout_block:" , rollout_block.shape)
-        #         print("rollout:" , rollout.shape)
                 
-        #         rollout = torch.bmm(rollout, rollout_block)
-        #         # rollout = rollout / rollout.sum(dim=-1, keepdim=True)
-        #         self.save_rollout_attention(rollout, save_atten_dir + "_zero_out",start_t=start_t, end_t=end_t, layer_id=bid, back=back,back_num= back_num)
                 
-        #         # print("after downblock:" , rollout.shape)
     
-        # else:
-        #     for block in self.down_blocks:
-        #         print("Zero Out, in Unet forward x_shape:", x.shape)
-        #         x_zero_out, xs_zero_out = block(x_zero_out, zero_out_cross_frame=True)
-        #         xss_zero_out.extend(xs_zero_out)
         
         
-        # # print("x-x_zero_out / x :" , torch.unique((x-x_zero_out) / x))
                 
-        # x = x + zero_out_epsilon * (x - x_zero_out)
         
         
         
@@ -1391,7 +1270,6 @@ class UNet_CAG_UpBlock(nn.Module):
             print("x.shape:", x.shape)
             print("mid_feature[0]:",  mid_feature[0].shape)
             
-            # 保存正逆向的中间特征
             save_feature_dir = os.environ.get("L4GM_MID_FEATURE_DIR")
             if save_feature_dir:
                 os.makedirs(save_feature_dir, exist_ok=True)
@@ -1415,15 +1293,10 @@ class UNet_CAG_UpBlock(nn.Module):
                 print(f"xss[{idx}]:" , xss[idx].shape)
                 print(f"xss[{idx}]:" ,  mid_feature[1][idx].shape)
                 xss[idx] =  mid_add_alpha * mid_feature[1][idx]  + (1- mid_add_alpha)  * xss[idx]
-            # xss =
             
         
 
         # # up
-        # for block in self.up_blocks:
-        #     xs = xss[-len(block.nets):]
-        #     xss = xss[:-len(block.nets)]
-        #     x = block(x, xs)
             
         # up, Modified By jiaxin, Add viz
         print("[SHAPE] Upblocks:", len(self.up_blocks))
@@ -1439,9 +1312,8 @@ class UNet_CAG_UpBlock(nn.Module):
             xs = xss[-len(block.nets):]
             xss = xss[:-len(block.nets)]
 
-            # 如果是最后一层，并设置了可视化
             if viz_last_up_attention and i == len(self.up_blocks) - 3:
-                x, temp_attn_weights,view_attn_weights = block(x, xs, return_attn=True, attn_resize= viz_atten_size )  # 假设你修改了 block 支持返回 attn
+                x, temp_attn_weights,view_attn_weights = block(x, xs, return_attn=True, attn_resize= viz_atten_size )
                 self.viz_temporal_attention(temp_attn_weights)
                 self.save_temporal_attention(temp_attn_weights, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=i, back=back,back_num= back_num)
                 
@@ -1458,9 +1330,8 @@ class UNet_CAG_UpBlock(nn.Module):
             xs = xss_zero_out[-len(block.nets):]
             xss_zero_out = xss_zero_out[:-len(block.nets)]
 
-            # 如果是最后一层，并设置了可视化
             if viz_last_up_attention and i == len(self.up_blocks) - 3:
-                x_zero_out, temp_attn_weights,view_attn_weights = block(x_zero_out, xs, return_attn=True, attn_resize= viz_atten_size )  # 假设你修改了 block 支持返回 attn
+                x_zero_out, temp_attn_weights,view_attn_weights = block(x_zero_out, xs, return_attn=True, attn_resize= viz_atten_size )
                 self.viz_temporal_attention(temp_attn_weights)
                 self.save_temporal_attention(temp_attn_weights, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=i, back=back,back_num= back_num)
                 
@@ -1484,138 +1355,18 @@ class UNet_CAG_UpBlock(nn.Module):
             return x, *mid_feature
 
         return x
-    
-
-# class UNet_recur(UNet):
-#     def __init__(self, in_channels: int = 3, out_channels: int = 3, down_channels: Tuple[int, ...] = (64, 128, 256, 512, 1024), down_attention: Tuple[bool, ...] = (False, False, False, True, True), mid_attention: bool = True, up_channels: Tuple[int, ...] = (1024, 512, 256), up_attention: Tuple[bool, ...] = (True, True, False), layers_per_block: int = 2, skip_scale: float = np.sqrt(0.5), num_views: int = 4, num_frames: int = 8, use_temp_attn: bool = True):
-#         super().__init__(in_channels, out_channels, down_channels, down_attention, mid_attention, up_channels, up_attention, layers_per_block, skip_scale, num_views, num_frames, use_temp_attn)
-        
-    
-#     def store_back_feature(self,images_back, viz_last_up_attention, viz_atten_size, save_atten_dir, start_t  , end_t, downblock_rollout, back, feature_bank   ):
-#         # x: [B, Cin, H, W]
-#         B = 1
-        
-        
-#         # first
-#         x = self.conv_in(x)
-        
-#         # down
-#         xss = [x]
-#         if downblock_rollout:
-#             BTV, C, H, W = x.shape
-#             # print("downblock x_shape:", x.shape)
-#             L = BTV 
-#             # print("L:" , L)
-            
-#             rollout = torch.eye(L, device=x.device).unsqueeze(0).repeat(B, 1, 1)  # [B, L, L]
-        
-#             for bid, block in enumerate(self.down_blocks):
-#                 x, xs, rollout_block = block(x, attn_rollout=True)
-#                 xss.extend(xs)
-#                 print("rollout_block:" , rollout_block.shape)
-#                 print("rollout:" , rollout.shape)
-                
-            
-                
-                
-#                 rollout = torch.bmm(rollout, rollout_block)
-#                 # rollout = rollout / rollout.sum(dim=-1, keepdim=True)
-#                 self.save_rollout_attention(rollout, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=bid, back=back,back_num= back_num)
-                
-#                 # print("after downblock:" , rollout.shape)
-    
-#         else:
-#             for block in self.down_blocks:
-#                 print("in Unet forward x_shape:", x.shape)
-#                 x, xs = block(x)
-#                 xss.extend(xs)
-            
-#         # mid
-#         x = self.mid_block(x)
-#         mid_feature = (x, xss)
-
-#         # # up
-#         # for block in self.up_blocks:
-#         #     xs = xss[-len(block.nets):]
-#         #     xss = xss[:-len(block.nets)]
-#         #     x = block(x, xs)
-            
-#         # up, Modified By jiaxin, Add viz
-#         print("[SHAPE] Upblocks:", len(self.up_blocks))
-#         temp_attn_weights = None
-#         view_attn_weights = None
-#         for i, block in enumerate(self.up_blocks):
-#             xs = xss[-len(block.nets):]
-#             xss = xss[:-len(block.nets)]
-
-#             # 如果是最后一层，并设置了可视化
-#             if viz_last_up_attention and i == len(self.up_blocks) - 3:
-#                 x, temp_attn_weights,view_attn_weights = block(x, xs, return_attn=True, attn_resize= viz_atten_size )  # 假设你修改了 block 支持返回 attn
-#                 self.viz_temporal_attention(temp_attn_weights)
-#                 self.save_temporal_attention(temp_attn_weights, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=i, back=back,back_num= back_num)
-                
-#                 self.viz_view_attention(view_attn_weights, save_dir="view_atten_vis")
-#                 self.save_view_attention(view_attn_weights, save_atten_dir,start_t=start_t, end_t=end_t, layer_id=i, back=back,back_num= back_num)
-                
-#             else:
-#                 x = block(x, xs)
-                
-#         # last
-#         x = self.norm_out(x)
-#         x = F.silu(x)
-#         x = self.conv_out(x) # [B, Cout, H', W']
-        
-
-#         if return_mid_feature:
-#             return x, *mid_feature
-
-#         return x
-
-
-# def visualize_attention_heatmap(tensor, title, filename, save_dir="./attn_visualizations", index=0):
-#     """
-#     可视化并保存注意力热图。W
-
-#     Args:
-#         tensor (torch.Tensor): 需要可视化的张量，形状 [*, H, W]。
-#         title (str): 图像标题。
-#         filename (str): 保存的文件名（不含路径）。
-#         save_dir (str): 保存目录。
-#         index (int): 第几个 batch 样本（默认显示第一个）。
-#     """
-#     os.makedirs(save_dir, exist_ok=True)
-#     heatmap_data = tensor[index].detach().cpu().numpy()
-
-#     plt.figure(figsize=(6, 5))
-#     sns.heatmap(heatmap_data, cmap='viridis')
-#     plt.title(title)
-#     plt.savefig(os.path.join(save_dir, filename))
-#     print(f"save heapmap {title} to {save_dir}")
-#     plt.close()
 
 
 def visualize_attention_heatmap(tensor, title, filename, save_dir="./attn_visualizations", index=0):
-    """
-    可视化并保存注意力热图。
-
-    Args:
-        tensor (torch.Tensor): 需要可视化的张量，形状 [*, H, W]。
-        title (str): 图像标题。
-        filename (str): 保存的文件名（不含路径）。
-        save_dir (str): 保存目录。
-        index (int): 第几个 batch 样本（默认显示第一个）。
-    """
     os.makedirs(save_dir, exist_ok=True)
     heatmap_data = tensor[index].detach().cpu().numpy()
 
-    # 将0值替换为NaN
     heatmap_data = np.where(heatmap_data == 0, np.nan, heatmap_data)
 
     plt.figure(figsize=(6, 5))
     sns.heatmap(heatmap_data, cmap='viridis', mask=np.isnan(heatmap_data), cbar_kws={"label": "Attention Value"})
     plt.title(title)
     plt.savefig(os.path.join(save_dir, filename))
-    # print(f"Saved heatmap '{title}' to {save_dir}")
     plt.close()
     
     

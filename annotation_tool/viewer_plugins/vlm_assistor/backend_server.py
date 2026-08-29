@@ -18,6 +18,18 @@ from typing import Any, Sequence
 import numpy as np
 from PIL import Image
 
+from http_security import (
+    DEFAULT_MAX_REQUEST_BYTES,
+    RequestError,
+    parse_allowed_roots,
+    read_json_body,
+    request_is_authorized,
+    require_secure_bind,
+    validate_payload_paths,
+)
+
+TOOL_ROOT = Path(__file__).resolve().parents[2]
+
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 VIDEO_AGENT_ALIASES = {
     "video_understanding",
@@ -702,6 +714,9 @@ def health_payload() -> dict[str, str]:
 
 class VLMBackendRequestHandler(BaseHTTPRequestHandler):
     service: VLMAgentService | None = None
+    api_token = ""
+    max_request_bytes = DEFAULT_MAX_REQUEST_BYTES
+    allowed_roots = parse_allowed_roots(TOOL_ROOT.parent)
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"[vlm-backend] {self.address_string()} - {fmt % args}")
@@ -714,8 +729,15 @@ class VLMBackendRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "error": "unsupported endpoint"}, code=404)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not request_is_authorized(self.headers, self.api_token):
+            self._send_json({"ok": False, "error": "unauthorized"}, code=401)
+            return
         try:
-            payload = self._read_json()
+            payload = read_json_body(self, self.max_request_bytes)
+            validate_payload_paths(payload, self.allowed_roots)
+        except RequestError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, code=exc.status)
+            return
         except Exception as exc:
             self._send_json({"ok": False, "error": f"invalid json: {exc}"}, code=400)
             return
@@ -749,16 +771,6 @@ class VLMBackendRequestHandler(BaseHTTPRequestHandler):
         code = 200 if bool(result.get("ok", False)) else 400
         self._send_json(result, code=code)
 
-    def _read_json(self) -> dict[str, Any]:
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(content_length)
-        if not raw:
-            return {}
-        data = json.loads(raw.decode("utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("top-level json must be object")
-        return data
-
     def _send_json(self, payload: dict[str, Any], code: int = 200) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(int(code))
@@ -772,6 +784,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="VLM Assistor backend for GPT-4o video understanding")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8020)
+    parser.add_argument("--api-token", default=os.environ.get("HAT4D_API_TOKEN", ""))
+    parser.add_argument("--max-request-bytes", type=int, default=DEFAULT_MAX_REQUEST_BYTES)
     parser.add_argument("--openai-base-url", type=str, default=None)
     parser.add_argument("--openai-model", type=str, default=None)
     parser.add_argument(
@@ -797,7 +811,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    require_secure_bind(args.host, args.api_token)
     VLMBackendRequestHandler.service = None
+    VLMBackendRequestHandler.api_token = str(args.api_token or "")
+    VLMBackendRequestHandler.max_request_bytes = int(args.max_request_bytes)
+    VLMBackendRequestHandler.allowed_roots = parse_allowed_roots(TOOL_ROOT.parent)
     if not args.health_only:
         config = BackendConfig.from_args(args)
         VLMBackendRequestHandler.service = VLMAgentService(config)

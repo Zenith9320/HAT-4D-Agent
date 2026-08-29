@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 from typing import Dict, Union
 
 import torch
@@ -35,13 +36,9 @@ class Denoiser(nn.Module):
         c_skip, c_out, c_in, c_noise = self.scaling(sigma)
         c_noise = self.possibly_quantize_c_noise(c_noise.reshape(sigma_shape))
 
-        # print('c.get("concat", torch.Tensor([]):', len(cond.get("concat", torch.Tensor([]))))
 
-        # for i in range(len(cond.get("concat", torch.Tensor([])))):
-        #     print(f"{i}:" , cond["concat"][i].shape)
 
         
-        # assert False
         return (
             network(input * c_in, c_noise, cond, **additional_model_inputs) * c_out
             + input * c_skip

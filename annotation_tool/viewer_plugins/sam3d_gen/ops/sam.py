@@ -25,9 +25,7 @@ from .helpers import _ensure_sam3d_thirdparty_on_path, _overlay_mask_and_points
 class SamMixin:
     """Mixin class providing SAM segmentation and frustum interaction methods."""
 
-    # ----------------------------
     # Frustum + picking
-    # ----------------------------
     def _build_or_update_frustum(self) -> None:
         app = self._app()
         assert self.state.image_disp_rgb_u8 is not None
@@ -37,7 +35,6 @@ class SamMixin:
         self.state.frustum_aspect = W / float(H)
 
         # Use the viewer's canonical "input" view pose so pose optimization/rendering aligns
-        # with the input image camera (az=0, el=0 by default).
         # Match the main viewer's default input view distance (see viser_frontend._move_camera_to_view).
         dist = 1.5
         eye, wxyz = app._eye_wxyz_for_view("input", float(dist))
@@ -207,9 +204,7 @@ class SamMixin:
             obj.mask_path = None
         self._run_sam_and_update_mask(client)
 
-    # ----------------------------
     # SAM
-    # ----------------------------
     def _ensure_sam_ready(self, client) -> bool:
         _ensure_sam3d_thirdparty_on_path()
         try:

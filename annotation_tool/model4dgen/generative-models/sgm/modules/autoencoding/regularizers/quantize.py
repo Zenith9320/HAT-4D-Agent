@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 import logging
 from abc import abstractmethod
 from typing import Dict, Iterator, Literal, Optional, Tuple, Union
@@ -18,7 +19,6 @@ class AbstractQuantizer(AbstractRegularizer):
     def __init__(self):
         super().__init__()
         # Define these in your init
-        # shape (N,)
         self.used: Optional[torch.Tensor]
         self.re_embed: int
         self.unknown_index: Union[Literal["random"], int]
@@ -119,8 +119,6 @@ class GumbelQuantizer(AbstractQuantizer):
     def forward(
         self, z: torch.Tensor, temp: Optional[float] = None, return_logits: bool = False
     ) -> Tuple[torch.Tensor, Dict]:
-        # force hard = True when we are in eval mode, as we must quantize.
-        # actually, always true seems to work
         hard = self.straight_through if self.training else True
         temp = self.temperature if temp is None else temp
         out_dict = {}

@@ -25,6 +25,7 @@ pretrained/
 
 # External source installed by scripts/install_external_dependencies.py
 thirdparty/viser/
+thirdparty/CLIP/
 viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects/
 viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects/thirdparty/segment-anything/
 viewer_plugins/vlm_assistor/thirdparty/VLM_toolkit_cross_gpfs/

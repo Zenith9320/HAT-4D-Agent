@@ -222,6 +222,9 @@ AGENT.md
 AGENTS.md
 
 tmp
+test
+**/test/
+**/tmp/
 
 # HAT-4D runtime output
 /results/

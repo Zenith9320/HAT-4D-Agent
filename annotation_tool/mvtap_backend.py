@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,6 +18,16 @@ import torch
 
 ROOT = Path(__file__).resolve().parent
 MVTAP_ROOT = ROOT / "MVTracker" / "MV-TAP"
+
+from http_security import (
+    DEFAULT_MAX_REQUEST_BYTES,
+    RequestError,
+    parse_allowed_roots,
+    read_json_body,
+    request_is_authorized,
+    require_secure_bind,
+    validate_payload_paths,
+)
 
 torch.set_float32_matmul_precision("high")
 
@@ -154,6 +165,9 @@ def health_payload() -> Dict[str, str]:
 
 class MVTAPRequestHandler(BaseHTTPRequestHandler):
     service: MVTAPService | None = None
+    api_token = ""
+    max_request_bytes = DEFAULT_MAX_REQUEST_BYTES
+    allowed_roots = parse_allowed_roots(ROOT.parent)
     default_num_points: int = 128
 
     def do_GET(self) -> None:  # noqa: N802
@@ -169,12 +183,14 @@ class MVTAPRequestHandler(BaseHTTPRequestHandler):
                 code=404,
             )
             return
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
+        if not request_is_authorized(self.headers, self.api_token):
+            self._send_json({"status": "error", "message": "unauthorized"}, code=401)
+            return
         try:
-            payload = json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError as exc:
-            self._send_json({"status": "error", "message": f"Invalid JSON: {exc}"}, code=400)
+            payload = read_json_body(self, self.max_request_bytes)
+            validate_payload_paths(payload, self.allowed_roots)
+        except RequestError as exc:
+            self._send_json({"status": "error", "message": str(exc)}, code=exc.status)
             return
         try:
             result = self._handle_track_request(payload)
@@ -307,6 +323,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="MV-TAP backend for ROI-driven tracklets.")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8010)
+    parser.add_argument("--api-token", default=os.environ.get("HAT4D_API_TOKEN", ""))
+    parser.add_argument("--max-request-bytes", type=int, default=DEFAULT_MAX_REQUEST_BYTES)
     parser.add_argument("--ckpt", type=str, default=str(MVTAP_ROOT / "ckpt" / "MVTAP.ckpt"))
     parser.add_argument("--device", type=str, default=None, help="cuda, cpu, or device id")
     parser.add_argument("--num-points", type=int, default=128, help="default points to sample inside bbox")
@@ -321,6 +339,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    require_secure_bind(args.host, args.api_token)
     MVTAPRequestHandler.service = None
     if not args.health_only:
         MVTAPRequestHandler.service = MVTAPService(
@@ -329,6 +348,9 @@ def main() -> None:
             disable_cam_embed=not args.enable_cam_embed,
         )
     MVTAPRequestHandler.default_num_points = int(args.num_points)
+    MVTAPRequestHandler.api_token = str(args.api_token or "")
+    MVTAPRequestHandler.max_request_bytes = int(args.max_request_bytes)
+    MVTAPRequestHandler.allowed_roots = parse_allowed_roots(ROOT.parent)
     server = ThreadingHTTPServer((args.host, args.port), MVTAPRequestHandler)
     print(f"mvtap backend listening on {args.host}:{args.port}")
     try:

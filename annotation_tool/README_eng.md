@@ -18,7 +18,7 @@ QwenVL is optional for fully manual annotation. The two model backends and front
 - Frontend, editor plugins, VLM agents, backend adapters, and service tests.
 - The HAT-4D L4GM/MoGA runtime source under `model4dgen/L4GM_MoGA`.
 - The modified SV4D2 runtime source under `model4dgen/generative-models`.
-- Pinned installers for SAM 3D Objects, Segment Anything, and Qwen3-VL source.
+- Pinned installers for SAM 3D Objects, Segment Anything, Qwen3-VL, and OpenAI CLIP source.
 
 The full MVOIK-4D dataset and model weights are intentionally excluded. Two reviewed demo subsets are included under [`asset/`](../asset/README.md) to make the annotation workflow directly testable; their CC BY-NC 4.0 data terms are separate from the source-code license. L4GM model weights are subject to their model license, including non-commercial restrictions described by the model provider. SAM3D and Qwen checkpoints have their own terms. Review all model licenses before downloading or redistributing weights.
 
@@ -38,10 +38,11 @@ From the HAT-4D repository root:
 python annotation_tool/scripts/install_external_dependencies.py \
   --only sam-3d-objects \
   --only segment-anything \
-  --only Qwen3-VL
+  --only Qwen3-VL \
+  --only openai-clip
 ```
 
-The installer uses immutable revisions from `external_dependencies.json`. Qwen3-VL source is optional when SGLang is installed from its package and the checkpoint is stored elsewhere.
+The installer uses immutable revisions from `external_dependencies.json`. Qwen3-VL source is optional when SGLang is installed from its package and the checkpoint is stored elsewhere. OpenAI CLIP is required by the ROI/L4GM environment.
 
 ### Frontend environment
 
@@ -60,14 +61,37 @@ so the official package remains fully usable without the custom shortcuts.
 ### ROI/L4GM environment
 
 ```bash
-conda create -n hat4d-roi python=3.10 -y
+conda create -n hat4d-roi python=3.11 -y
 conda activate hat4d-roi
 python -m pip install --upgrade pip
+python -m pip install torch==2.7.0 torchvision==0.22.0 \
+  --index-url https://download.pytorch.org/whl/cu128
 python -m pip install -r annotation_tool/requirements.txt
+python -m pip install 'setuptools<81'
+python -m pip install --no-build-isolation -e annotation_tool/thirdparty/CLIP
 python -m pip install -r annotation_tool/requirements_roi.txt
 ```
 
-Install the PyTorch, xFormers, gsplat, and CUDA builds appropriate for your GPU before resolving the remaining packages if the default wheels do not match your system.
+The locked ROI stack was tested with PyTorch 2.7.0, Torchvision 0.22.0, and
+CUDA 12.8. Install matching wheels for the local driver before resolving the
+remaining packages if the defaults do not match the machine.
+
+### Backend security
+
+Set the same token in every backend and frontend terminal. Add every input or
+output root outside this repository to the colon-separated allowlist:
+
+```bash
+export HAT4D_TOKEN_FILE="${XDG_RUNTIME_DIR:-/tmp}/hat4d-${UID}.token"
+test -s "$HAT4D_TOKEN_FILE" || (umask 077 && openssl rand -hex 32 > "$HAT4D_TOKEN_FILE")
+export HAT4D_API_TOKEN="$(cat "$HAT4D_TOKEN_FILE")"
+export HAT4D_ALLOWED_ROOTS="$PWD:/path/to/input-data:/path/to/results"
+```
+
+Health endpoints do not require the token. Other requests do, and non-loopback
+backend binds are rejected when the token is empty. The Viser frontend has no
+built-in authentication and refuses all non-loopback binds; remote access must
+use an authenticated tunnel or notebook proxy.
 
 ### SAM3D environment
 
@@ -103,7 +127,12 @@ The runtime expects these files or explicit environment-variable overrides:
 | SAM3D Objects | `.../sam-3d-objects/checkpoints/hf/pipeline.yaml`, or set `SAM3D_PIPELINE_CONFIG` |
 | Qwen3-VL | Any local checkpoint directory, passed as `QWEN_MODEL_PATH` |
 
-The SV4D weight is the HAT-4D encoder variant, not the standard upstream `sv4d2.safetensors`. Renaming a different checkpoint will not make it compatible.
+The SV4D weight is the HAT-4D encoder variant, not the standard upstream
+`sv4d2.safetensors`. Renaming a different checkpoint will not make it
+compatible. Its public download and model-license page is pending; until that
+release exists, external users cannot reproduce the ROI initialization path.
+The expected file is 12,117,981,868 bytes and has SHA256
+`fa46c1d2101ad8cc32e6d3cc4513e1c083f4e2729935467e3d42a57a88a6403a`.
 
 Download the official L4GM and Segment Anything weights from the repository
 root:

@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 from functools import partial
 
 import torch
@@ -264,7 +265,6 @@ class PostHocSpatialTransformerWithTimeMixing(SpatialTransformer):
         self,
         x: torch.Tensor,
         context: Optional[torch.Tensor] = None,
-        # cam: Optional[torch.Tensor] = None,
         time_context: Optional[torch.Tensor] = None,
         timesteps: Optional[int] = None,
         image_only_indicator: Optional[torch.Tensor] = None,

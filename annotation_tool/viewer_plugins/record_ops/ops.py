@@ -38,9 +38,7 @@ class RecordOps:
         with self.state.lock:
             return self.state.recording_enabled and self.state.session_active
 
-    # ----------------------------
     # Event handlers (called from plugin hooks)
-    # ----------------------------
 
     def on_sam3d_begin(self, client, frame_token: str, frame_idx: int) -> None:
         """Called when SAM3D Gen begins. Saves pre-edit 6-view images."""
@@ -209,9 +207,7 @@ class RecordOps:
         with self.state.lock:
             self.state.session_active = False
 
-    # ----------------------------
     # Internal helpers
-    # ----------------------------
 
     def _save_pre_edit_views(self, frame_idx: int) -> None:
         """Save 6-view images before any edits."""

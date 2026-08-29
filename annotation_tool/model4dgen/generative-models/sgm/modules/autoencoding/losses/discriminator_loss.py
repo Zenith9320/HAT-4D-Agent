@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import numpy as np
@@ -132,7 +133,6 @@ class GeneralLPIPSWithDiscriminator(nn.Module):
         alpha_fake = torch.abs(logits_fake) / high
         # -> (b, 1, h, w) in range [0, 0.5]
         # alpha value of lines don't really matter, since the values are the same
-        # for both images and logits anyway
         grid_alpha_real = torchvision.utils.make_grid(alpha_real, nrow=4)
         grid_alpha_fake = torchvision.utils.make_grid(alpha_fake, nrow=4)
         grid_alpha = 0.8 * torch.cat((grid_alpha_real, grid_alpha_fake), dim=1)

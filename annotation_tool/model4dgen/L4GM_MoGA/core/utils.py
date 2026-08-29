@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 import numpy as np
 
 import torch
@@ -11,29 +12,23 @@ def flip_pitch_towards_origin_stable(cam_poses):
     pos = cam_poses[:, :3, 3]
     R_old = cam_poses[:, :3, :3]
 
-    # 球坐标
     x, y, z = pos[:,0:1], pos[:,1:2], pos[:,2:3]
     r = torch.norm(pos, dim=-1, keepdim=True)
     theta = torch.atan2(z, x)
     phi = torch.atan2(y, torch.sqrt(x**2 + z**2))
-    phi = -phi  # 翻转俯仰
+    phi = -phi
 
-    # 新位置
     x_new = r * torch.cos(phi) * torch.cos(theta)
     y_new = r * torch.sin(phi)
     z_new = r * torch.cos(phi) * torch.sin(theta)
     pos_new = torch.cat([x_new, y_new, z_new], dim=-1)
 
-    # forward 指向原点
     forward = -pos_new / torch.norm(pos_new, dim=-1, keepdim=True)
 
-    # 用固定 world up 向量，处理极端俯仰
     world_up = torch.tensor([0,1,0], device=pos.device, dtype=pos.dtype).expand_as(forward)
-    # 检查 forward 和 world_up 共线情况
     dot = (forward * world_up).sum(dim=-1, keepdim=True)
-    mask = torch.abs(dot) > 0.999  # 接近共线
+    mask = torch.abs(dot) > 0.999
 
-    # 对接近共线的 forward，用临时向量修正 up
     up = world_up.clone()
     up[mask.expand_as(up)] = torch.tensor([0,0,1], device=pos.device, dtype=pos.dtype)
 
@@ -50,41 +45,25 @@ def flip_pitch_towards_origin_stable(cam_poses):
 
 
 def mirror_cam_xz(cam_poses: torch.Tensor) -> torch.Tensor:
-    """
-    对 cam_poses 在 x-z 平面做对称，保持相机朝向原点，
-    并保证相机右方向和原始相机一致。
-    
-    Args:
-        cam_poses: [B, 4, 4] 相机到世界变换矩阵
-    
-    Returns:
-        mirrored_cam_poses: [B, 4, 4]
-    """
     B = cam_poses.shape[0]
     
     cam_pos = cam_poses[:, :3, 3]  # [B, 3]
-    cam_right = cam_poses[:, :3, 0]  # 原相机右方向
-    cam_up = cam_poses[:, :3, 1]     # 原相机上方向
+    cam_right = cam_poses[:, :3, 0]
+    cam_up = cam_poses[:, :3, 1]
     
-    # 对称位置
     mirrored_pos = cam_pos.clone()
-    mirrored_pos[:, 1] *= -1  # y 轴取反
+    mirrored_pos[:, 1] *= -1
     
-    # 重新计算朝向向量（指向原点）
     forward = -mirrored_pos  # look_at target=origin
     forward = forward / forward.norm(dim=-1, keepdim=True)
     
-    # 保持右方向不变
     right = cam_right / cam_right.norm(dim=-1, keepdim=True)
     
-    # 重新计算上方向
     up = torch.cross(forward, right, dim=-1)
     up = up / up.norm(dim=-1, keepdim=True)
     
-    # 再次正交化 right
     right = torch.cross(up, forward, dim=-1)
     
-    # 构建 4x4 矩阵
     mirrored_cam_poses = torch.eye(4, device=cam_poses.device).unsqueeze(0).repeat(B, 1, 1)
     mirrored_cam_poses[:, :3, 0] = right
     mirrored_cam_poses[:, :3, 1] = up
@@ -95,28 +74,20 @@ def mirror_cam_xz(cam_poses: torch.Tensor) -> torch.Tensor:
 
 
 def flip_pitch_towards_origin(cam_poses):
-    """
-    cam_poses: [N,4,4] camera-to-world
-    翻转相机围绕原点连线的俯仰角，同时保持朝向原点。
-    """
     pos = cam_poses[:, :3, 3]  # [N,3]
-    r = torch.norm(pos, dim=-1, keepdim=True)  # 半径
+    r = torch.norm(pos, dim=-1, keepdim=True)
     
     x, y, z = pos[:,0:1], pos[:,1:2], pos[:,2:3]
-    # 球坐标：theta = azimuth, phi = elevation
     theta = torch.atan2(z, x)
     phi = torch.atan2(y, torch.sqrt(x**2 + z**2))
     
-    # 翻转俯仰
     phi = -phi
     
-    # 转回笛卡尔
     x_new = r * torch.cos(phi) * torch.cos(theta)
     y_new = r * torch.sin(phi)
     z_new = r * torch.cos(phi) * torch.sin(theta)
     pos_new = torch.cat([x_new, y_new, z_new], dim=-1)
     
-    # 生成新的旋转矩阵，让相机朝向原点
     forward = -pos_new / torch.norm(pos_new, dim=-1, keepdim=True)
     tmp_up = torch.tensor([0,1,0], device=cam_poses.device, dtype=cam_poses.dtype).expand_as(forward)
     right = torch.linalg.cross(tmp_up, forward)
@@ -134,8 +105,6 @@ def flip_pitch_towards_origin(cam_poses):
 
 
 def matrix_to_euler_xyz(R):
-    # 输入: R [..., 3, 3]
-    # 输出: [..., 3] -> [roll(x), pitch(y), yaw(z)]
     sy = torch.sqrt(R[...,0,0]**2 + R[...,1,0]**2)
     singular = sy < 1e-6
 
@@ -269,32 +238,15 @@ def grid_distortion(images, strength=0.5):
     return images
 
 def apply_random_mask(image_tensor, mask_ratio=0.3):
-    """
-    对 (C, H, W) 图像 Tensor 应用 Patch Masking，将遮掩区域设置为白色 (1.0)。
-    
-    参数:
-        image_tensor (torch.Tensor): 输入图像 Tensor，形状为 (C, H, W)。
-        mask_ratio (float): 遮掩区域占总面积的比例。
-        
-    返回:
-        torch.Tensor: 应用了白色 Patch Masking 的 Tensor。
-    """
     _, H, W = image_tensor.shape
     device = image_tensor.device
     
-    # 生成一个与图像大小相同的随机 Mask
     mask = torch.rand(H, W, device=device) < mask_ratio
     
-    # 将 Mask 扩展到所有通道 (C, H, W)
     mask = mask.unsqueeze(0).expand_as(image_tensor)
     
-    # 创建一个白色张量 (值 1.0)
     white_tensor = torch.ones_like(image_tensor, device=device)
     
-    # 逻辑操作：
-    # 1. 原始图像 * (~mask)：保留未被遮掩的区域。
-    # 2. 白色张量 * mask：获取被遮掩区域的白色值。
-    # 3. 两者相加得到最终结果。
     masked_tensor = (image_tensor * (~mask)) + (white_tensor * mask)
     
     return masked_tensor
@@ -302,13 +254,10 @@ def apply_random_mask(image_tensor, mask_ratio=0.3):
 import torch
 import random
 from typing import Tuple, Union
-# 导入 Kornia 库
 try:
     from kornia.filters import GaussianBlur2d
 except ImportError:
     print("Warning: Kornia not installed. Please install it using 'pip install kornia'.")
-    # 如果 Kornia 未安装，我们使用一个替代函数，但性能和功能可能受限
-    # 在生产环境中，强烈推荐安装 Kornia。
     def GaussianBlur2d(*args, **kwargs):
         raise NotImplementedError("Kornia is required for this function.")
 
@@ -318,59 +267,28 @@ def apply_gaussian_blur(
     kernel_size: Union[int, Tuple[int, int]] = 5, 
     sigma: Tuple[float, float] = (0.1, 2.0)
 ) -> torch.Tensor:
-    """
-    对 PyTorch Tensor 应用随机参数的高斯模糊。
     
-    参数:
-        image_tensor (torch.Tensor): 输入图像 Tensor，形状为 (C, H, W) 或 (B, C, H, W)，
-                                     通常是 L4GM 中的 (3, H, W)。
-        kernel_size (int | Tuple[int, int]): 模糊核的大小 (例如 5 代表 5x5)。
-        sigma (Tuple[float, float]): Sigma 值的范围，将从中随机选择一个值。
-        
-    返回:
-        torch.Tensor: 应用了高斯模糊的 Tensor。
-    """
-    
-    # 确保 kernel_size 是奇数，这是高斯模糊核的要求
     if isinstance(kernel_size, int):
         kernel_size = (kernel_size, kernel_size)
     if kernel_size[0] % 2 == 0:
         kernel_size = (kernel_size[0] + 1, kernel_size[1] + 1)
         
-    # ----------------------------------------------------
-    # 1. 形状处理：Kornia 的 GaussianBlur2d 要求 (B, C, H, W) 格式
-    # ----------------------------------------------------
     original_shape = image_tensor.shape
     if len(original_shape) == 3:
-        # 如果是 (C, H, W)，添加 batch 维度：(1, C, H, W)
         image_tensor = image_tensor.unsqueeze(0)
     elif len(original_shape) != 4:
         raise ValueError(f"Input tensor must be (C, H, W) or (B, C, H, W), but got {original_shape}")
 
-    # ----------------------------------------------------
-    # 2. 随机选择 Sigma 值
-    # ----------------------------------------------------
     sigma_val = random.uniform(*sigma)
     
-    # ----------------------------------------------------
-    # 3. 创建并应用高斯模糊操作
-    # ----------------------------------------------------
     
-    # 创建 GaussianBlur2d 实例。注意 sigma 必须是 float 或 Tuple[float, float]
-    # 我们对 x 和 y 轴使用相同的随机 sigma 值
     blur_op = GaussianBlur2d(kernel_size, (sigma_val, sigma_val))
     
-    # 确保 blur_op 和 tensor 在同一个设备上
     blur_op = blur_op.to(image_tensor.device)
     
-    # 应用模糊
     blurred_tensor = blur_op(image_tensor)
     
-    # ----------------------------------------------------
-    # 4. 恢复原始形状
-    # ----------------------------------------------------
     if len(original_shape) == 3:
-        # 移除添加的 batch 维度：(C, H, W)
         return blurred_tensor.squeeze(0)
     else:
         return blurred_tensor

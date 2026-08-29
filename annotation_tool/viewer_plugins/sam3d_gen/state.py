@@ -21,7 +21,7 @@ class Sam3DObjectState:
     # Generation outputs
     sam3d_output: Optional[dict] = None
     splat: Optional[SplatData] = None  # in camera-local coords (viser convention)
-    frame_handle: Any = None  # viser.FrameHandle (camera frame parent)
+    frame_handle: Any = None
     gs_handle: Any = None  # viser.GaussianSplatHandle
 
     # Manual global scaling (used for interactive size adjustment during pose opt workflow).
@@ -98,12 +98,12 @@ class Sam3DGenState:
         # rotating the image pixels. This keeps SAM3D inputs unmodified while fixing
         # the visual orientation in the frustum.
         self.frustum_roll_180: bool = False
-        self.image_rgb_u8: Optional[np.ndarray] = None  # original (after flip_udlr for display consistency)
+        self.image_rgb_u8: Optional[np.ndarray] = None
         self.image_disp_rgb_u8: Optional[np.ndarray] = None  # downsampled for frustum display
         self.image_downsample: int = 1
 
         self.frustum_handle: Any = None
-        self.frustum_wxyz: Optional[np.ndarray] = None  # world_from_camera (wxyz)
+        self.frustum_wxyz: Optional[np.ndarray] = None
         self.frustum_position: Optional[np.ndarray] = None  # world position
         self.frustum_aspect: float = 1.0
         self.frustum_scale: float = 0.35

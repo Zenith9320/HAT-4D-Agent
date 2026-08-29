@@ -299,11 +299,9 @@ class Sam3DGenUI:
                 except Exception:
                     pass
 
-        # Click = one step.
         self.scale_down_btn.on_click(lambda _evt: _nudge_manual_scale(0.95))
         self.scale_up_btn.on_click(lambda _evt: _nudge_manual_scale(1.05))
 
-        # Hold = continuous small steps.
         try:
             self.scale_down_btn.on_hold(lambda _evt: _nudge_manual_scale(0.995), callback_hz=20.0)
             self.scale_up_btn.on_hold(lambda _evt: _nudge_manual_scale(1.005), callback_hz=20.0)

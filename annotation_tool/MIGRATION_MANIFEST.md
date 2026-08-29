@@ -26,6 +26,7 @@ part of this distribution.
 | `model4dgen/generative-models/` | Modified SV4D2 inference source and HAT-4D encoder configuration |
 | `requirements.txt`, `requirements_roi.txt` | Base and ROI/L4GM Python dependencies |
 | `LICENSE` | License shipped with the source runtime |
+| `model4dgen/*/MODIFICATIONS.md` | Upstream revision and HAT-4D modification notices |
 
 The copy deliberately preserves module locations and public interfaces to keep
 the frontend/backend protocol compatible with the source-tested workflow.
@@ -65,12 +66,12 @@ local checkouts.
 | Segment Anything | `6fdee8f2727f4506cfbbe553e23b895e27956588` |
 | Qwen3-VL | `96588727e44c78b25ba03ea03b8e12f7e64fd0da` |
 
-The source-tested L4GM base revision was
-`261434711d6db969819cd122573ed603cdc0f4db`; the modified generative-models base
-revision was `7a2e81f16e6cca202e9f43e9842a9abef6aa2431`. Their required modified runtime
-files are bundled because the HAT-4D inference changes are not reproducible from
-the public upstream repositories alone. Their original license files are kept
-beside the code. The optional VLM toolkit at
+The migration source recorded `261434711d6db969819cd122573ed603cdc0f4db` for
+L4GM and `7a2e81f16e6cca202e9f43e9842a9abef6aa2431` for generative-models. These
+identifiers are not fetchable from the named public upstream repositories and
+are provenance identifiers, not publicly reproducible Git revisions. Required
+modified runtime files are therefore bundled with upstream licenses and HAT-4D
+change notices. The optional VLM toolkit at
 `250b7a4d97edb211e2d8373d6db34c2e26887102` remains provenance-only in
 `external_dependencies.unavailable.json`; the direct HTTP Qwen backend does not
 require it. MV-TAP is not in the lock because the migration source did not
@@ -89,3 +90,7 @@ provide a publishable implementation and revision for that optional adapter.
   machine-specific configuration, and all symbolic-link targets.
 - Training entry points and experiment-only tests that are unrelated to the
   published inference runtime.
+- Obsolete `models_abandon.py`, `models_viz_tmp_1215_synced.py`, and the
+  non-runnable Objaverse and Memory4D training providers.
+- Training-only data modules, including CIFAR10 and MNIST examples, and the
+  former L4GM `train_utils.py`; inference keeps only a small runtime seed helper.

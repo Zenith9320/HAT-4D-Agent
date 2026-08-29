@@ -29,9 +29,7 @@ class BackendClientMixin:
         except Exception:
             return False
 
-    # ----------------------------
     # Backend calls
-    # ----------------------------
     def _backend_fetch_status(self, client, *, timeout: float = 5.0) -> Optional[dict]:
         app = self._app()
         try:

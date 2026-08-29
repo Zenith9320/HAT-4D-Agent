@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 import math
 import os
 import sys
@@ -50,21 +51,17 @@ def load_module_gpu(model):
 def move_all_to_cuda(model, device="cuda"):
     device = torch.device(device)
 
-    # 1. 先递归迁移已注册模块
     model.to(device)
 
-    # 2. 强制扫描所有子模块参数
     for name, module in model.named_modules():
         for pname, param in module.named_parameters(recurse=False):
             if param.device != device:
-                # print(f"[MOVE] {name}.{pname}: {param.device} -> {device}")
                 param.data = param.data.to(device)
                 if param.grad is not None:
                     param.grad = param.grad.to(device)
 
         for bname, buf in module.named_buffers(recurse=False):
             if buf.device != device:
-                # print(f"[MOVE-BUF] {name}.{bname}: {buf.device} -> {device}")
                 module._buffers[bname] = buf.to(device)
 
     return model
@@ -247,7 +244,6 @@ def preprocess_video(
             if image.mode == "RGBA":
                 pass
             else:
-                # image.thumbnail([W, H], Image.Resampling.LANCZOS)
                 image = remove(image.convert("RGBA"), alpha_matting=True)
             images[i] = image
 
@@ -307,7 +303,6 @@ def preprocess_video(
         ] = image_arr[x : x + w, y : y + h]
 
         rgba = Image.fromarray(padded_image).resize((W, H), Image.LANCZOS)
-        # rgba = image.resize((W, H), Image.LANCZOS)
         rgba_arr = np.array(rgba) / 255.0
         rgb = rgba_arr[..., :3] * rgba_arr[..., -1:] + (1 - rgba_arr[..., -1:])
         image = (rgb * 255).astype(np.uint8)
@@ -801,7 +796,6 @@ def run_img2vid(
     value_dict["cond_motion"] = cond_motion
     value_dict["cond_view"] = cond_view
 
-    # seed_everything(seed)
 
     options["num_frames"] = T
     sampler, num_rows, num_cols = init_sampling_no_st(options=options)
@@ -839,8 +833,8 @@ def sampler_refine(
     uc,
     additional_model_inputs,
     mask_keep=None,             # latent_keep mask (1=keep, 0=edit)
-    sigma_start=1.0,            # 起始噪声强度
-    num_refine_steps=8,         # 去噪步数
+    sigma_start=1.0,
+    num_refine_steps=8,
 ):
     """
     Latent refinement via truncated EDM diffusion.
@@ -853,36 +847,23 @@ def sampler_refine(
     device = z0.device
     dtype = z0.dtype
 
-    # ----------------------------------------------------
-    # 1. 构造完整 sigma schedule（来自原 sampler）
-    # ----------------------------------------------------
     sigmas_full = sampler.discretization(
         sampler.num_steps, device=device
     ).to(device=device, dtype=dtype)   # [σ_max ... σ_0]
 
-    # ----------------------------------------------------
-    # 2. 找到最接近 sigma_start 的起点
-    # ----------------------------------------------------
     start_idx = (sigmas_full - sigma_start).abs().argmin().item()
     print("sigmas_full:0", sigmas_full)
     print("sigma:",  sigma_start)
 
-    # 截断 sigma 轨迹，只保留后半段
     sigmas = sigmas_full[start_idx : start_idx + num_refine_steps + 1]
     num_sigmas = len(sigmas)
 
-    # ----------------------------------------------------
-    # 3. 构造初始噪声 latent:  x = z0 + σ_start * ε
-    # ----------------------------------------------------
     eps = torch.randn_like(z0)
     x = z0 + sigmas[0] * eps
 
-    # EDM 内部的 scale 因子
     s_in = x.new_ones([x.shape[0]])
     
-    # ----------------------------------------------------
     # 4. truncated EDM sampling loop
-    # ----------------------------------------------------
     for i in tqdm(range(num_sigmas - 1)):
         sigma = s_in * sigmas[i]
         next_sigma = s_in * sigmas[i + 1]
@@ -904,9 +885,6 @@ def sampler_refine(
             gamma,
         )
 
-        # ------------------------------------------------
-        # 5. mask latent replace (保持低频结构)
-        # ------------------------------------------------
         if mask_keep is not None:
             sigma_view = append_dims(sigmas[i + 1], x.ndim)
             z_known = z0 + sigma_view * eps
@@ -1074,8 +1052,6 @@ def run_img2vid_masked_denoising(
     )
     eps_known = torch.randn_like(z0)
 
-    # randn = torch.randn_like(z0)
-    # print("rand:", randn.shape)
 
     def denoiser(input, sigma, c_cond):
         return model.denoiser(model.model, input, sigma, c_cond, **additional_model_inputs)
@@ -1085,19 +1061,15 @@ def run_img2vid_masked_denoising(
         z_known = z0 + sigma_view * eps_known
         return latent_keep * z_known + (1.0 - latent_keep) * latents
 
-    # load_module_gpu(model.model)
     move_all_to_cuda(model.model)
     load_module_gpu(model.denoiser)
     
-    model_dtype = next(model.model.parameters()).dtype  # 通常是 torch.float16
+    model_dtype = next(model.model.parameters()).dtype
     device = next(model.model.parameters()).device
     
-    # randn = cast_cond(randn, device=device, model_dtype= model_dtype)
     c =  cast_cond(c, device=device, model_dtype= model_dtype)
     uc = cast_cond(uc, device=device, model_dtype= model_dtype)
     z0 =  cast_cond(z0, device=device, model_dtype= model_dtype)
-    # print("model.model:" ,model.model.device)
-    # print("model.denoiser:", model.denoiser.device)
     print("z0:", z0,device)
     
     samples_z = sampler_refine(
@@ -1111,7 +1083,6 @@ def run_img2vid_masked_denoising(
         sigma_start=sigma_start,
         num_refine_steps=num_refine_steps,
     )
-    # samples_z = sampler(denoiser, randn, c, uc)
     unload_module_gpu(model.denoiser)
     unload_module_gpu(model.model)
 
@@ -1346,7 +1317,6 @@ def do_sample(
                 
                 shape = (math.prod(num_samples), C, H // F, W // F)
                 randn = torch.randn(shape).to("cuda")
-                # print("rand:", randn.shape)
 
                 def denoiser(input, sigma, c, **kwargs):
                     return model.denoiser(
@@ -1767,7 +1737,6 @@ def get_batch(
             or key == "cond_frames_without_noise"
             or key == "back_frames"
         ):
-            # batch[key] = repeat(value_dict[key], "1 ... -> b ...", b=N[0])
             batch[key] = value_dict[key]
 
         elif key == "interpolation_context":
@@ -1833,22 +1802,10 @@ def load_model(
         model = instantiate_from_config(config.model).to(device).eval()
 
 
-    # # ===========================
-    # # 🔥 编译 UNet（核心加速点）
-    # # ===========================
-    # if device == "cuda":
-    #     print("[INFO] Compiling SpatialUNetModelWithTime with torch.compile...")
         
-    #     # 找到 UNet
-    #     unet = model.model   # 标准 SGM 路径
 
-    #     unet.eval()
-    #     unet = torch.compile(unet, mode="max-autotune")
 
-    #     model.model = unet
 
-    #     print("[INFO] UNet compiled successfully.")
 
-    # # ==============
     filter = DeepFloydDataFiltering(verbose=False, device=device)
     return model, filter

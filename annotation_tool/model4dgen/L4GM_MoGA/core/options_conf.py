@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 # SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -61,8 +62,7 @@ class Options:
     train_dataset_path: str = ""
     
     
-    force_fixed_ele_zero: bool = False # 强迫让输入的固定几个视角的仰角为0，虽然可能有些case有上下15°的浮动，就算是数据增强
-    # for memory4d_subset
+    force_fixed_ele_zero: bool = False
     data_root: str = ""
     data_type: str = "render"
     split_version: str = "v1"
@@ -107,11 +107,7 @@ class Options:
     gradient_clip: float = 1.0
     # mixed precision
     mixed_precision: str = 'bf16'
-    # learning rate
-    # lr: float = 4e-4
     lr: float = 4e-5
-    # lr: float = 4e-6
-    # augmentation prob for grid distortion
     prob_grid_distortion: float = 0.5
     # augmentation prob for camera jitter
     prob_cam_jitter: float = 0.5
@@ -133,8 +129,6 @@ class Options:
     fancy_video: bool = False
 
     # 4D
-    # 区分一下num_clip_frames 是模型中输入的长度,每次训练会以这个程度进行自回归
-    # num_frames 是训练时的数据视频输入的总长度
     num_frames: int = 32
     num_clip_frames: int = 8
     recur_clip: bool = False
@@ -177,7 +171,6 @@ class Options:
     encoder: str = "v0_1"
     encoder_feature_dim: int = 1024
     
-    # Memory相关参数
     use_memory: bool = True
     l4gm_model: str = "v4"
     memory_size: int = 12
@@ -191,8 +184,6 @@ class Options:
     memory_bank: str = "v1"
     injector_num_layers: int = 2
     
-    # v1 是和中间层做记忆attention，效果不明显
-    # v5 改为和UpBlock某一层做attention
     unet_version: str = "v0" 
     memory_cross_upblock_id: int = 0
     

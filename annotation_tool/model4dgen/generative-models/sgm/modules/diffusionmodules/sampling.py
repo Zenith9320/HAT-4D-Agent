@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 """
     Partially ported from https://github.com/crowsonkb/k-diffusion/blob/master/k_diffusion/sampling.py
 """
@@ -108,12 +109,9 @@ class EDMSampler(SingleStepDiffusionSampler):
         print("sampler_step time denoise:", time.time() - start)
 
         euler_step = self.euler_step(x, d, dt)
-        # print("x:", x.shape)
-        # print("sampler_step time euler_step:", time.time() - start)
         x = self.possible_correction_step(
             euler_step, x, d, dt, next_sigma, denoiser, cond, uc
         )
-        # print("sampler_step time step:", time.time() - start)
 
         return x
 
@@ -235,33 +233,9 @@ class EulerEDMSampler(EDMSampler):
     ):
         return euler_step
 
-# # Jiaxin
-# class EulerEDMSampler_Refiner(EulerEDMSampler):
-#     def __call__(self, denoiser, x, cond, uc=None, num_steps=None, callback=None,  sigma_start= None, ):
-#         x, s_in, sigmas, num_sigmas, cond, uc = self.prepare_sampling_loop(
-#             x, cond, uc, num_steps
-#         )
 
-#         for i in tqdm(self.get_sigma_gen((num_sigmas))):
-#             gamma = (
-#                 min(self.s_churn / (num_sigmas - 1), 2**0.5 - 1)
-#                 if self.s_tmin <= sigmas[i] <= self.s_tmax
-#                 else 0.0
-#             )
-#             x = self.sampler_step(
-#                 s_in * sigmas[i],
-#                 s_in * sigmas[i + 1],
-#                 denoiser,
-#                 x,
-#                 cond,
-#                 uc,
-#                 gamma,
-#             )
 
-#             if callback is not None:
-#                 x = callback(i, s_in * sigmas[i + 1], x)
 
-#         return x
 
 
 

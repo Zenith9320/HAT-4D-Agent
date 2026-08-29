@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 # SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -35,7 +36,6 @@ import imageio
 
 
 from ..utils.viz_utils import save_images_clip_as_video
-# from core.moga import calculate_group_balancing_loss_from_list
 from ..utils.viz_utils import logits_to_groups_with_capacity, get_group_map_from_flat, visualize_moga_groups_multiview
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
@@ -76,7 +76,6 @@ class LGM(nn.Module):
         elif self.opt.unet_version == "moga_v1":
             print("[VERSION] UNet Memory Attention: MoGA_v1")
             print("self.opt.moga_lambda:", self.opt.moga_lambda)
-            # 这个当 use_moga_attn  为False 或者 moga_lambda = 0 会退化为 baseline
             from core_free_fn.moga import MoGA_UNet
             # unet
             self.unet = MoGA_UNet(
@@ -158,7 +157,6 @@ class LGM(nn.Module):
             rays_embeddings.append(rays_plucker)
 
             ## visualize rays for plotting figure
-            # kiui.vis.plot_image(rays_d * 0.5 + 0.5, save=True)
 
         rays_embeddings = torch.stack(rays_embeddings, dim=0).permute(0, 3, 1, 2).contiguous().to(device) # [V, 6, h, w]
         
@@ -176,17 +174,13 @@ class LGM(nn.Module):
         input_other_views_azis = input_azis[1:]
         
 
-        # ======== 加入自回归======
         
         if not recur_clip:
             CLIP_NUMBER = int(T / CN)
             for clip_id in range(CLIP_NUMBER):
-                # 这里需要输入的data 已经分段处理好
                 images_clip = images[:, (clip_id) * 4 * CN : (clip_id+1) * 4 * CN , : , : , : ]
-                # print("image_clip:", images_clip.type)
                 
                 viz_images_clip =  images_clip[:,:,:3,:,:]
-                # save_images_clip_as_video(viz_images_clip, CN=8, V=4, save_path=f"./debug/clip_from_{clip_id * (CN)}_to_{(clip_id+1) * CN -1 }.mp4", fps=2)
                 
                 gaussians_clip =  self.forward_gaussians(images_clip) # [B * T, N, 15]
                 gaussians.append(gaussians_clip.reshape(B, CN, -1, 14))
@@ -216,8 +210,6 @@ class LGM(nn.Module):
             
             
             for clip_id in range(CLIP_NUMBER):
-                # print(f"{clip_id} clip,  images:", images.shape)
-                # print(f" (clip_id) * 4 * (CN-1) + 4 : (clip_id+1) * 4 * (CN-1) + 4 : { (clip_id) * 4 * (CN-1) + 4 : (clip_id+1) * 4 * (CN-1) + 4 }")
                 
                 images_clip_after =  images[:, (clip_id) * 4 * (CN-1) + 4 : (clip_id+1) * 4 * (CN-1) + 4 , : , : , : ].reshape(B, -1, self.opt.num_input_views, *images.shape[-3:])
                 print(f"{clip_id} clip,  images_clip_after:", images_clip_after.shape)
@@ -238,12 +230,9 @@ class LGM(nn.Module):
                     cam_view_input_first_frame = torch.concat(cam_view_ls, dim = 0)
                     cam_view_proj_input_first_frame = torch.concat(cam_view_proj_ls, dim=0) 
                     cam_pos_input_first_frame = torch.concat(cam_pos_ls , dim = 0)
-                    # print(cam_pos_input_first_frame .shape)
-                    # print("first_frame_gs:", first_frame_gs.shape)
                 
 
                     images_clip_first_frame_other_views = self.gs.render(first_frame_gs.repeat(self.opt.num_input_views - 1,1,1), cam_view_input_first_frame, cam_view_proj_input_first_frame, cam_pos_input_first_frame, bg_color=bg_color)["image"]
-                    # print("images_clip_first_frame_other_views :", images_clip_first_frame_other_views )
                     images_clip_first_frame_other_views = images_clip_first_frame_other_views.reshape(-1, *images_clip_first_frame_other_views.shape[-3:] )
                     images_clip_first_frame_other_views = TF.normalize(images_clip_first_frame_other_views, IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD)
                     images_clip_first_frame_other_views = F.interpolate(
@@ -259,8 +248,6 @@ class LGM(nn.Module):
                 images_clip = images_clip.reshape(B, CN* 4,*images.shape[-3:])
                 
                 viz_images_clip =  images_clip[:,:,:3,:,:].float()
-                # save_images_clip_as_video(viz_images_clip, CN=8, V=4, save_path=f"./debug/rec_clip_from_{clip_id * (CN-1)}_to_{(clip_id+1) * (CN-1) }.mp4", fps=2)
-                # 可选可视化对应的attention
                 if not  viz_group_logit:
                     gaussians_clip =  self.forward_gaussians(images_clip) # [B * T, N, 15]
                 else:
@@ -279,9 +266,6 @@ class LGM(nn.Module):
                         sub_H = int(math.sqrt( token_L // CN // self.opt.num_input_views))
                         final_group_map = get_group_map_from_flat(CN, self.opt.num_input_views, group_map, B,  sub_H, sub_H)
                         visualize_moga_groups_multiview(final_group_map, (CN * B *self.opt.num_input_views, 1, H, W),CN  , self.opt.num_input_views , sample_index = 0, save_path = save_img_path)
-                # print(f"from {clip_id * (CN -1)} to {(clip_id + 1) * (CN - 1)}: ")
-                # print("image_clip:", images_clip.shape)
-                # print("gaussians_clip :", gaussians_clip.shape )
                 
                 if clip_id == 0:
                     start_id = 0
@@ -292,14 +276,11 @@ class LGM(nn.Module):
                         
                     
         gaussians = torch.concat(gaussians, dim=1)
-        # print("gaussian:", gaussians.shape)
     
         # use the first view to predict gaussians
 
         gaussians = gaussians.reshape(B * T, -1, 14) # [B * T, N, 14]
-        # print("res guassian:", gaussians.shape )
 
-        # results['gaussians'] = gaussians
 
         # always use white bg
         bg_color = torch.ones(3, dtype=torch.float32, device=gaussians.device)
@@ -309,10 +290,7 @@ class LGM(nn.Module):
     
     
     def evaluate(self, data, num_frames, num_clip_frames):
-        # 针对测试时太长的片段，可以用这个函数自回归的生成output
-        # 不能用于训练，因为自回归过程中的梯度累计会容易炸现存
         # images: [B, T, 4, 9, H, W]
-        # return: Gaussians: [B, dim_t]
         assert num_clip_frames == self.num_clip_frames
         
         images = data['input'] # [B, Tx4, 9, h, W], input features
@@ -374,11 +352,8 @@ class LGM(nn.Module):
             images_clip[:,1:,1:] = images_clip[:,0:1,1:]
             images_clip = images_clip.reshape(B, CN* 4,*images.shape[-3:])
             
-            # viz_images_clip =  images_clip[:,:,:3,:,:].float()
-            # save_images_clip_as_video(viz_images_clip, CN=8, V=4, save_path=f"./debug/rec_clip_from_{clip_id * (CN-1)}_to_{(clip_id+1) * (CN-1) }.mp4", fps=2)
 
             gaussians_clip =  self.forward_gaussians(images_clip) # [B * T, N, 15]
-            # gaussians_clip = gaussians_clip[ :B*(CN-repeat_len), :,:]
             curr_clip_num = CN-repeat_len
             
             if clip_id == 0:
@@ -387,7 +362,6 @@ class LGM(nn.Module):
                 start_id = 1
             gaussians.append(gaussians_clip.reshape(B, CN, -1, 14)[:, start_id: start_id + curr_clip_num, :, :])
 
-        # =============
                  
         gaussians = torch.concat(gaussians, dim=1)
         
@@ -395,7 +369,6 @@ class LGM(nn.Module):
         # use the first view to predict gaussians
 
         gaussians = gaussians.reshape(B * T, -1, 14) # [B * T, N, 14]
-        # print("res guassian:", gaussians.shape )
         
         # always use white bg
         bg_color = torch.ones(3, dtype=torch.float32, device=gaussians.device)
@@ -406,7 +379,6 @@ class LGM(nn.Module):
         data['cam_view_proj'] = data['cam_view_proj'].reshape(B*T, -1, *data['cam_view_proj'].shape[2:])
         data['cam_pos'] = data['cam_pos'].reshape(B*T, -1, *data['cam_pos'].shape[2:])
     
-        # gaussians = gaussians[:,:, :14]
         
         results = self.gs.render(gaussians, data['cam_view'], data['cam_view_proj'], data['cam_pos'], bg_color=bg_color)
         pred_images = results['image'] # [B*T, V, C, output_size, output_size]
@@ -450,8 +422,6 @@ class LGM(nn.Module):
 
     def forward_gaussians(self, images, return_group_logit = False, return_group_loss = False, num_clip_frames = None ):
         # images: [B, T, 4, 9, H, W]
-        # return: Gaussians: [B, dim_t]
-        # print("images:", images.shape )
         B, TV, C, H, W = images.shape
         if num_clip_frames is None:
             T = self.num_clip_frames
@@ -510,30 +480,9 @@ class LGM(nn.Module):
         return_group_logit: bool = False,
         vis_img: bool = False
     ):
-        """
-        计算单个 clip 的 forward，不做 backward。
-        返回:
-            loss_clip (Tensor)
-            psnr_clip (Tensor)
-            out_clip (dict):
-                {
-                    "images_pred": [B*clip_num, V, C, H, W]
-                    "alphas_pred": [B*clip_num, V, 1, H, W]
-                    "conf_pred":   [B*clip_num, V, 1, H, W]  (若用)
-                    "loss":        标量 Tensor
-                    "loss_recon":  Tensor
-                    "loss_lpips":  Tensor or 0
-                    "loss_group":  Tensor
-                    "psnr":        Tensor
-                }
-        """
         
         import torch.distributed as dist
         
-        # if dist.is_initialized():
-        #     print(f"[RANK {dist.get_rank()}] forward_clip executed")
-        # else:
-        #     print("forward_clip executed (no DDP)")
 
 
 
@@ -573,7 +522,6 @@ class LGM(nn.Module):
             B, T, -1, *data['cam_pos'].shape[2:]
         )
 
-        # ========================= clip 分割 ==========================
         if not self.recur_clip:
             clip_start_id = clip_id * CN
             clip_end_id = (clip_id + 1) * CN
@@ -598,7 +546,6 @@ class LGM(nn.Module):
                 "use forward_recur for recurrent clip inference"
             )
             
-        # ==== 可视化输入视频片段 images_clip ====
         if vis_img:
             import os
             from torchvision.utils import save_image
@@ -636,7 +583,6 @@ class LGM(nn.Module):
                             
                     
 
-        # ======================= 渲染 =========================
         bg_color = torch.ones(3, dtype=torch.float32, device=gaussians_clip.device)
 
         clip_cam_view = all_cam_view[:, clip_start_id:clip_end_id].reshape(
@@ -656,7 +602,6 @@ class LGM(nn.Module):
         pred_images = results['image']     # [B*clip_num, V, 3, H, W]
         pred_alphas = results['alpha']     # [B*clip_num, V, 1, H, W]
 
-        # ======================= GT 对齐 =========================
         gt_images = all_images_output[:, clip_start_id:clip_end_id].reshape(
             B * curr_clip_num, -1, *data['images_output'].shape[2:]
         )
@@ -666,9 +611,7 @@ class LGM(nn.Module):
 
         gt_images = gt_images * gt_masks + bg_color.view(1,1,3,1,1)*(1-gt_masks)
         
-        # ==== 检查数据 ======
         if vis_img:
-            # print(data["image_folder"])
             
             vis_dir = "./tmp/viz_pred_train_memory4d_v2"
             import os
@@ -681,7 +624,6 @@ class LGM(nn.Module):
                 # pred_images, gt_images: [B*clip_num, V, 3, H, W]
                 Bc, V, _, H, W = pred_images.shape
 
-                # clamp 到 [0,1]，防止数值炸
                 pred_vis = pred_images.detach().clamp(0, 1).cpu()
                 gt_vis   = gt_images.detach().clamp(0, 1).cpu()
 
@@ -694,7 +636,6 @@ class LGM(nn.Module):
                         pred_img = pred_vis[bc_id, v_id]  # [3, H, W]
                         gt_img   = gt_vis[bc_id, v_id]    # [3, H, W]
 
-                        # 拼接：左 pred，右 gt → [3, H, 2W]
                         concat = torch.cat([pred_img, gt_img], dim=2)
                         os.makedirs(os.path.join( vis_dir,case_name ), exist_ok=True)
 
@@ -703,8 +644,6 @@ class LGM(nn.Module):
                         )
 
                         save_image(concat, save_path)
-                        # print("save：", save_path )
-            # assert False
 
         # ================== Loss ======================
     
@@ -735,11 +674,10 @@ class LGM(nn.Module):
         with torch.no_grad():
             psnr = -10 * torch.log10(torch.mean((pred_images.detach() - gt_images)**2))
 
-        # ================== 输出 ======================
         out_clip = {
             "images_pred": pred_images.detach(),
             "alphas_pred": pred_alphas.detach(),
-            "conf_pred": None,  # 如果有 conf，再补
+            "conf_pred": None,
             "loss": loss.detach(),
             "loss_recon": loss_recon.detach(),
             "loss_lpips": loss_lpips.detach(),
@@ -754,21 +692,15 @@ class LGM(nn.Module):
     def forward(self, data, mode="default",**kwargs):
         
         if mode == "default":
-            # 原本的计算一整段视频的推理，会计算Loss, 允许梯度，后续进行参数优化, 但容易显存爆炸，所以已不用
             self.num_frames = num_frames  if num_frames != None else self.opt.num_frames
             assert self.num_frames <= self.num_clip_frames
-            # TODO 实现能够计算 BlanceGroup Loss
-            return self.forward_no_recur(data, **kwargs) # 如果训练长度和数据长度相同，可以采用不分段输出为loss，然后在主函数进行梯度下降
+            return self.forward_no_recur(data, **kwargs)
         
         elif mode == "test":
-            # For Test, 自回归做一整段视频的推理，会计算Loss, 但是不进行参数优化，无梯度
             return self.forward_recur_test(data,  **kwargs)
         elif mode == "clip":
-            # For Train, 计算视频中某一个clip片段的 推理并计算Loss, 允许梯度，后续进行参数优化
-            # 必须用forward把 forward相关函数包起来，才能确保保持不同模型 是相同的计算图，正常进行梯度回传避免死锁
             return self.forward_clip(data=data, **kwargs)
         elif mode == "eval":
-            # For Eval, 自回归做一整段视频的推理，不会计算Loss, 只测metric, 但是不进行参数优化，无梯度
             return self.evaluate(data=data, **kwargs)
         else:
             raise ValueError
@@ -827,14 +759,12 @@ class LGM(nn.Module):
                     images_clip = images[:, (clip_id) * 4 * CN : (clip_id+1) * 4 * CN , : , : , : ]
                     viz_images_clip =  images_clip[:,:,:3,:,:]
             
-                    # save_images_clip_as_video(viz_images_clip, CN=8, V=4, save_path=f"./debug/clip_from_{clip_id * (CN)}_to_{(clip_id+1) * CN -1 }.mp4", fps=2)
                     if self.use_moga_attn:
                         gaussians_clip, res =  self.forward_gaussians(images_clip, return_group_logit = return_group_logit, return_group_loss = True) # [B * CN, N, 15]
                     else:
                         gaussians_clip =  self.forward_gaussians(images_clip, return_group_logit = False, return_group_loss =  False) # [B * CN, N, 15]
                         group_logit = None
                     start_id = 0
-                    # data_gourp_balance_loss +=  calculate_group_balancing_loss_vectorized(group_logit, self.moga_group)
                 else:
                     clip_start_id = clip_id * (CN - 1)
                     clip_end_id = (clip_id+1) * (CN - 1) + 1
@@ -875,7 +805,6 @@ class LGM(nn.Module):
                     images_clip = images_clip.reshape(B, CN* 4,*images.shape[-3:])
                     
                     viz_images_clip =  images_clip[:,:,:3,:,:].float()
-                    # save_images_clip_as_video(viz_images_clip, CN=8, V=4, save_path=f"./debug/rec_clip_from_{clip_id * (CN-1)}_to_{(clip_id+1) * (CN-1) }.mp4", fps=2)
                     
                     if self.use_moga_attn:
                         gaussians_clip, res =  self.forward_gaussians(images_clip, return_group_logit = return_group_logit, return_group_loss = True) # [B * CN, N, 15]
@@ -883,7 +812,6 @@ class LGM(nn.Module):
                         gaussians_clip =  self.forward_gaussians(images_clip, return_group_logit = False, return_group_loss =  False) # [B * CN, N, 15
                         group_logit = None
                     gaussians_clip = gaussians_clip[ :B*(CN-repeat_len), :,:]
-                    # data_gourp_balance_loss +=  calculate_group_balancing_loss_vectorized(group_logit, self.moga_group)
                     curr_clip_num = CN-repeat_len
                     
 
@@ -910,7 +838,6 @@ class LGM(nn.Module):
                 gt_images =  all_images_output[:,  clip_start_id : clip_end_id , :, : , : ].reshape(B* curr_clip_num, -1, *data['images_output'].shape[2:])  
                 gt_masks =  all_masks_output[:,  clip_start_id : clip_end_id  , :, : , : ].reshape(B* curr_clip_num, -1, *data['masks_output'].shape[2:])  
                 gt_images = gt_images * gt_masks + bg_color.view(1, 1, 3, 1, 1) * (1 - gt_masks)
-                # group_logit = torch.concat(group_logit, dim = 0)
                 loss_group = res["loss"]
                 loss_mse =  F.mse_loss(pred_images, gt_images) + F.mse_loss(pred_alphas, gt_masks) 
                 loss =  loss_mse + self.group_loss_lambda * loss_group 
@@ -956,7 +883,6 @@ class LGM(nn.Module):
 
     def forward_no_recur(self, data, step_ratio=1, return_group_logit = False):
         # data: output of the dataloader
-        # return: loss
         
         assert self.num_frames <= self.num_clip_frames
 

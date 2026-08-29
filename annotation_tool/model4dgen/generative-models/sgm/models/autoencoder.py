@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 import logging
 import math
 import re
@@ -62,7 +63,6 @@ class AbstractAutoencoder(pl.LightningModule):
         raise NotImplementedError()
 
     def on_train_batch_end(self, *args, **kwargs):
-        # for EMA computation
         if self.use_ema:
             self.model_ema(self)
 
@@ -170,7 +170,6 @@ class AutoencodingEngine(AbstractAutoencoder):
     def get_input(self, batch: Dict) -> torch.Tensor:
         # assuming unified data format, dataloader returns a dict.
         # image tensors should be scaled to -1 ... 1 and in channels-first
-        # format (e.g., bchw instead if bhwc)
         return batch[self.input_key]
 
     def get_autoencoder_params(self) -> list:
@@ -199,20 +198,16 @@ class AutoencodingEngine(AbstractAutoencoder):
         return_reg_log: bool = False,
         unregularized: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, dict]]:
-        # print("2) x:", x.shape)
         z = self.encoder(x)
-        # print("2) z:", z.shape)
         if unregularized:
             return z, dict()
         z, reg_log = self.regularization(z)
         if return_reg_log:
             return z, reg_log
-        # print("3) z:", z.shape)
         return z
 
     def decode(self, z: torch.Tensor, **kwargs) -> torch.Tensor:
         x = self.decoder(z, **kwargs)
-        # print("DeCode:", x.shape)
         return x
 
     def forward(
@@ -437,7 +432,6 @@ class AutoencodingEngine(AbstractAutoencoder):
             log[log_str] = xrec_add
         return log
 
-# By Jiaxin
 class AutoencodingEngineLegacyDIY(AutoencodingEngine):
     def __init__(self, embed_dim: int, **kwargs):
         self.max_batch_size = kwargs.pop("max_batch_size", None)
@@ -468,9 +462,7 @@ class AutoencodingEngineLegacyDIY(AutoencodingEngine):
         self, x: torch.Tensor, return_reg_log: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, dict]]:
         if self.max_batch_size is None:
-            # print("0) x:", x.shape)
             z = self.encoder(x)
-            # print("0) z:", z.shape)
             z = self.quant_conv(z) # 
         else:
             N = x.shape[0]
@@ -479,16 +471,13 @@ class AutoencodingEngineLegacyDIY(AutoencodingEngine):
             z = list()
             for i_batch in range(n_batches):
                 z_batch = self.encoder(x[i_batch * bs : (i_batch + 1) * bs])
-                # print("0) z_batch:", z_batch.shape)
                 z_batch = self.quant_conv(z_batch)
                 z.append(z_batch)
             z = torch.cat(z, 0)
 
-        # print("1) z:", z.shape)
         z, reg_log = self.regularization(z)
         if return_reg_log:
             return z, reg_log
-        # print("1.5) z:", z.shape)
         return z
 
 
@@ -529,9 +518,7 @@ class AutoencodingEngineLegacy(AutoencodingEngine):
         self, x: torch.Tensor, return_reg_log: bool = False
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, dict]]:
         if self.max_batch_size is None:
-            # print("0) x:", x.shape)
             z = self.encoder(x)
-            # print("0) z:", z.shape)
             z = self.quant_conv(z) # 
         else:
             N = x.shape[0]
@@ -540,16 +527,13 @@ class AutoencodingEngineLegacy(AutoencodingEngine):
             z = list()
             for i_batch in range(n_batches):
                 z_batch = self.encoder(x[i_batch * bs : (i_batch + 1) * bs])
-                # print("0) z_batch:", z_batch.shape)
                 z_batch = self.quant_conv(z_batch)
                 z.append(z_batch)
             z = torch.cat(z, 0)
 
-        # print("1) z:", z.shape)
         z, reg_log = self.regularization(z)
         if return_reg_log:
             return z, reg_log
-        # print("1.5) z:", z.shape)
         return z
 
     def decode(self, z: torch.Tensor, **decoder_kwargs) -> torch.Tensor:

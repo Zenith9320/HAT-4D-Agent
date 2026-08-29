@@ -17,12 +17,22 @@ import numpy as np
 # Allow running as a standalone script (fix relative import issues).
 ROOT = Path(__file__).resolve().parent
 PARENT = ROOT.parent
-for p in (ROOT, PARENT):
+TOOL_ROOT = ROOT.parents[2]
+for p in (ROOT, PARENT, TOOL_ROOT):
     sp = str(p)
     if sp not in sys.path:
         sys.path.insert(0, sp)
 
 from core import BackendConfig, Sam3DBackend
+from http_security import (
+    DEFAULT_MAX_REQUEST_BYTES,
+    RequestError,
+    parse_allowed_roots,
+    read_json_body,
+    request_is_authorized,
+    require_secure_bind,
+    validate_payload_paths,
+)
 
 
 def health_payload() -> Dict[str, str]:
@@ -57,14 +67,17 @@ class _Handler(BaseHTTPRequestHandler):
             # Client disconnected mid-response (common when frontend polls /status while GPU is busy).
             return
 
-    def _read_json(self) -> Dict[str, Any]:
-        n = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(n) if n > 0 else b"{}"
-        return json.loads(raw.decode("utf-8"))
+    def _authorize(self) -> bool:
+        if request_is_authorized(self.headers, self.server.api_token):
+            return True
+        self._send_json(401, {"ok": False, "error": "unauthorized"})
+        return False
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path.rstrip("/") == "/health":
             self._send_json(200, health_payload())
+            return
+        if not self._authorize():
             return
         if self.path.rstrip("/") == "/status":
             try:
@@ -86,8 +99,11 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         t0 = time.time()
+        if not self._authorize():
+            return
         try:
-            payload = self._read_json()
+            payload = read_json_body(self, self.server.max_request_bytes)
+            validate_payload_paths(payload, self.server.allowed_roots)
             path = self.path.rstrip("/")
             if path == "/sam/set_image":
                 out = self.server.backend.sam_set_image(
@@ -153,6 +169,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True, **out, "dt_s": time.time() - t0})
                 return
             self._send_json(404, {"ok": False, "error": f"unknown path: {self.path}"})
+        except RequestError as exc:
+            self._send_json(exc.status, {"ok": False, "error": str(exc)})
         except Exception as exc:
             try:
                 if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
@@ -171,15 +189,27 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class _Server(ThreadingHTTPServer):
-    def __init__(self, addr: Tuple[str, int], backend: Sam3DBackend | None):
+    def __init__(
+        self,
+        addr: Tuple[str, int],
+        backend: Sam3DBackend | None,
+        *,
+        api_token: str = "",
+        max_request_bytes: int = DEFAULT_MAX_REQUEST_BYTES,
+    ):
         super().__init__(addr, _Handler)
         self.backend = backend
+        self.api_token = str(api_token)
+        self.max_request_bytes = int(max_request_bytes)
+        self.allowed_roots = parse_allowed_roots(TOOL_ROOT.parent)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="SAM + SAM3D backend for 4DGsEditor viser plugin.")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8015)
+    parser.add_argument("--api-token", default=os.environ.get("HAT4D_API_TOKEN", ""))
+    parser.add_argument("--max-request-bytes", type=int, default=DEFAULT_MAX_REQUEST_BYTES)
     parser.add_argument("--sam-checkpoint", type=str, default=None)
     parser.add_argument("--sam-model-type", type=str, default="vit_h")
     parser.add_argument("--sam-device", type=str, default="cuda")
@@ -206,6 +236,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    require_secure_bind(args.host, args.api_token)
     if bool(args.no_flash_attn):
         os.environ["SAM3D_NO_FLASH_ATTN"] = "1"
         os.environ["ATTN_BACKEND"] = "sdpa"
@@ -228,7 +259,12 @@ def main() -> None:
     )
     backend = None if args.health_only else Sam3DBackend(cfg)
 
-    server = _Server((cfg.host, cfg.port), backend)
+    server = _Server(
+        (cfg.host, cfg.port),
+        backend,
+        api_token=args.api_token,
+        max_request_bytes=args.max_request_bytes,
+    )
     print(f"SAM3D backend listening on http://{cfg.host}:{cfg.port}")
     server.serve_forever()
 

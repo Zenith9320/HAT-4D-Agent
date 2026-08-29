@@ -1,6 +1,6 @@
 # HAT-4D 标注工具 UI 使用指南
 
-[English](ui_README.md) | [返回项目 README](README.md) | [环境安装与启动](annotation_tool/README_ch.md)
+[English](ui_README.md) | [返回项目 README](../README.md) | [环境安装与启动](../annotation_tool/README_ch.md)
 
 本文介绍完成服务启动后，如何使用 Viser 前端初始化 3D 物体、传播 4D
 Gaussian 序列，以及修复中间失败帧。默认前端地址为

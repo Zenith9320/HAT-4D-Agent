@@ -56,9 +56,7 @@ class PoseOptMixin:
         except Exception:
             pass
 
-    # ----------------------------
     # Pose optimization (best-effort)
-    # ----------------------------
     def optimize_pose_current_object_async(
         self,
         client,
@@ -583,9 +581,7 @@ class PoseOptMixin:
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # -----------------------
         # Target mask (downsample)
-        # -----------------------
         gt = torch.from_numpy(mask_np.astype(np.float32))[None, None].to(device=device)
         H0, W0 = int(gt.shape[-2]), int(gt.shape[-1])
         scale_factor = float(min_side) / float(max(1, min(H0, W0)))
@@ -595,9 +591,6 @@ class PoseOptMixin:
             gt = F.interpolate(gt, size=(Hr, Wr), mode="bilinear", align_corners=False)
             gt = (gt > 0.5).float()
 
-        # -----------------------
-        # Intrinsics (fallback from app fov)
-        # -----------------------
         fov_y = float(app.fov_deg)
         fy_norm = 0.5 / max(1e-6, math.tan(math.radians(fov_y) * 0.5))
         fx_norm = fy_norm * (float(Hr) / max(1e-6, float(Wr)))
@@ -627,9 +620,7 @@ class PoseOptMixin:
             shader=SoftSilhouetteShader(blend_params=blend_params),
         )
 
-        # -----------------------
         # Mesh verts/faces (Y-up -> Z-up)
-        # -----------------------
         verts_y = np.asarray(mesh_obj.vertices, dtype=np.float32)
         faces_np = np.asarray(mesh_obj.faces, dtype=np.int64)
         M_y2z = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]], dtype=np.float32)

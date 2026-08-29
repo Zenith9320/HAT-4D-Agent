@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 from functools import partial
 from typing import List, Optional, Union
 
@@ -571,7 +572,6 @@ class PostHocAttentionBlockWithTimeMixing(AttentionBlock):
         self,
         x: th.Tensor,
         context: Optional[th.Tensor] = None,
-        # cam: Optional[th.Tensor] = None,
         time_context: Optional[th.Tensor] = None,
         timesteps: Optional[int] = None,
         image_only_indicator: Optional[th.Tensor] = None,
@@ -1062,7 +1062,6 @@ class SpatialUNetModelWithTime(nn.Module):
             num_heads = ch // num_head_channels
             dim_head = num_head_channels
         if legacy:
-            # num_heads = 1
             dim_head = ch // num_heads if use_spatial_transformer else num_head_channels
 
         self.middle_block = TimestepEmbedSequential(

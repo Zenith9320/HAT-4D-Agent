@@ -12,6 +12,7 @@ import sys
 import numpy as np
 import torch
 from PIL import Image
+from http_security import validate_identifier
 
 # Support both package and script execution (avoid relative-import errors)
 _THIS_DIR = Path(__file__).resolve().parent
@@ -113,9 +114,7 @@ class Sam3DBackend:
                 self.sam3d_status = "failed"
                 self.sam3d_error = f"{type(exc).__name__}: {exc}"
 
-    # -----------------------
     # Init
-    # -----------------------
     def _ensure_sam(self) -> None:
         with self._sam_init_lock:
             if self._sam_predictor is not None:
@@ -176,9 +175,7 @@ class Sam3DBackend:
             self._sam3d_pipeline = instantiate(config)
             _ = torch
 
-    # -----------------------
     # Public endpoints
-    # -----------------------
     def status(self) -> Dict[str, Any]:
         with self._lock:
             return {
@@ -268,7 +265,7 @@ class Sam3DBackend:
             output_dir = str((_repo_root() / "tmp").resolve())
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        sid = session_id or "default"
+        sid = validate_identifier(session_id or "default", "session_id")
         oid = int(object_id or 0)
         mask_path = out_dir / "sam3d_gen" / "masks" / sid / f"obj_{oid}.png"
         _write_mask_png(mask, mask_path)
@@ -385,7 +382,7 @@ class Sam3DBackend:
             q_old = gs.get_rotation
             gs.from_rotation(quaternion_multiply(q_fix.expand(q_old.shape[0], -1), q_old))
 
-        sid = session_id or "default"
+        sid = validate_identifier(session_id or "default", "session_id")
         ply_path = out_dir / "sam3d_gen" / "objects" / sid / f"obj_{int(object_id):03d}.ply"
         ply_path.parent.mkdir(parents=True, exist_ok=True)
         gs.save_ply(str(ply_path))
@@ -470,7 +467,7 @@ class Sam3DBackend:
             raise FileNotFoundError(f"mask_path not found: {p_mask}")
         out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-        sid = session_id or "default"
+        sid = validate_identifier(session_id or "default", "session_id")
         oid = int(object_id)
 
         self._ensure_sam3d()
@@ -675,7 +672,7 @@ class Sam3DBackend:
             has_world_lock = bool(lock_world_x or lock_world_y or lock_world_z)
 
             R_pre_world = R_fix.T if R_fix is not None else torch.eye(3, device=device, dtype=torch.float32)
-            B_cam_to_world = torch.matmul(R_pre_world, R_cw.T)  # local(camera) -> world rotation
+            B_cam_to_world = torch.matmul(R_pre_world, R_cw.T)
             t_world_offset = t_cw.view(1, 3)
 
             w_center = base_op_t.detach()
@@ -887,7 +884,6 @@ class Sam3DBackend:
                     c0, _ = _weighted_center(v0_world[0])
                     if torch.isfinite(c0).all():
                         # Use initial X as the target (or 0 if you prefer absolute constraint)
-                        # init_x_target = float(c0[0].item())  # keep near initial X
                         init_x_target = 0.0  # keep near X=0
             except Exception:
                 pass

@@ -29,6 +29,9 @@ def test_annotation_guides_cover_installation_and_workflow() -> None:
         assert "Total cover" in text
         assert "RESUME_WORKSPACE" in text
         assert "external_dependencies.json" in text
+        assert "HAT4D_API_TOKEN" in text
+        assert "HAT4D_ALLOWED_ROOTS" in text
+        assert "fa46c1d2101ad8cc32e6d3cc4513e1c083f4e2729935467e3d42a57a88a6403a" in text
 
 
 def test_ui_guides_document_critical_workflow_and_local_images() -> None:

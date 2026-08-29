@@ -108,7 +108,6 @@ class SV4DInpaintingBackend:
         # Eagerly load the model once at startup with default settings to avoid per-request init.
         self._default_total_frames = self.config["version_dict"].get("T", self.config["T"] * self.config["V"])
         self._default_num_steps = 50
-        # try:
         self._get_or_load_model(
             total_frames=self._default_total_frames,
             num_steps=self._default_num_steps,
@@ -116,8 +115,6 @@ class SV4DInpaintingBackend:
             encoding_t=8,
             force=False,
             )
-        # except Exception as exc:  # noqa: BLE001
-        #     # Allow backend construction even if weights are missing; will raise on first use.
 
     # -------------------------- public API --------------------------
     def gen3d(

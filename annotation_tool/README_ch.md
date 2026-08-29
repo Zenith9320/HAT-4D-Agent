@@ -18,7 +18,7 @@
 - 前端、编辑插件、VLM Agent、后端适配器和服务测试。
 - `model4dgen/L4GM_MoGA` 中的 HAT-4D L4GM/MoGA 运行时代码。
 - `model4dgen/generative-models` 中的定制 SV4D2 运行时代码。
-- SAM 3D Objects、Segment Anything、Qwen3-VL 的固定版本安装器。
+- SAM 3D Objects、Segment Anything、Qwen3-VL 和 OpenAI CLIP 的固定版本安装器。
 
 仓库不包含完整的 MVOIK-4D 数据集、模型权重、缓存和生成结果。根目录 [`asset/`](../asset/README.md) 中保留了两个经过检查的 demo 子集，以便直接测试标注流程；它们采用 CC BY-NC 4.0 数据许可，与源代码许可相互独立。L4GM 权重包含模型提供方声明的非商业限制；SAM3D 和 Qwen 权重也有各自许可。下载或分发权重前请自行确认并接受对应条款。
 
@@ -38,10 +38,11 @@
 python annotation_tool/scripts/install_external_dependencies.py \
   --only sam-3d-objects \
   --only segment-anything \
-  --only Qwen3-VL
+  --only Qwen3-VL \
+  --only openai-clip
 ```
 
-安装器按照 `external_dependencies.json` 中的固定 commit 拉取源码。如果通过 Python 包安装 SGLang 且 Qwen 权重放在仓库外，可以不下载 Qwen3-VL 源码。
+安装器按照 `external_dependencies.json` 中的固定 commit 拉取源码。如果通过 Python 包安装 SGLang 且 Qwen 权重放在仓库外，可以不下载 Qwen3-VL 源码；ROI/L4GM 环境仍需要 OpenAI CLIP。
 
 ### 前端环境
 
@@ -59,14 +60,35 @@ python -m pip install -r annotation_tool/requirements.txt
 ### ROI/L4GM 环境
 
 ```bash
-conda create -n hat4d-roi python=3.10 -y
+conda create -n hat4d-roi python=3.11 -y
 conda activate hat4d-roi
 python -m pip install --upgrade pip
+python -m pip install torch==2.7.0 torchvision==0.22.0 \
+  --index-url https://download.pytorch.org/whl/cu128
 python -m pip install -r annotation_tool/requirements.txt
+python -m pip install 'setuptools<81'
+python -m pip install --no-build-isolation -e annotation_tool/thirdparty/CLIP
 python -m pip install -r annotation_tool/requirements_roi.txt
 ```
 
-如果默认 wheel 与机器 CUDA 不匹配，请先安装适合本机的 PyTorch、xFormers 和 gsplat，再安装其余依赖。
+锁定的 ROI 环境已在 PyTorch 2.7.0、Torchvision 0.22.0 和 CUDA 12.8
+上测试。如果默认 wheel 与机器 CUDA 不匹配，请先安装适合本机驱动的 wheel。
+
+### 后端安全配置
+
+在所有后端和前端终端中设置相同 token。仓库之外的输入、输出目录必须加入
+以冒号分隔的允许列表：
+
+```bash
+export HAT4D_TOKEN_FILE="${XDG_RUNTIME_DIR:-/tmp}/hat4d-${UID}.token"
+test -s "$HAT4D_TOKEN_FILE" || (umask 077 && openssl rand -hex 32 > "$HAT4D_TOKEN_FILE")
+export HAT4D_API_TOKEN="$(cat "$HAT4D_TOKEN_FILE")"
+export HAT4D_ALLOWED_ROOTS="$PWD:/path/to/input-data:/path/to/results"
+```
+
+健康检查不需要 token，其他请求需要。没有 token 时，后端拒绝绑定非回环地址。
+Viser 前端没有内置鉴权，会拒绝所有非回环绑定；远程访问必须通过带鉴权的隧道或
+Notebook 代理。
 
 ### SAM3D 环境
 
@@ -100,7 +122,11 @@ python -m pip install sglang
 | SAM3D Objects | `.../sam-3d-objects/checkpoints/hf/pipeline.yaml`，或设置 `SAM3D_PIPELINE_CONFIG` |
 | Qwen3-VL | 任意本地权重目录，通过 `QWEN_MODEL_PATH` 指定 |
 
-这里的 SV4D 权重是 HAT-4D 使用的 encoder 定制版本，不是官方标准 `sv4d2.safetensors`。仅重命名其他 checkpoint 不能兼容。
+这里的 SV4D 权重是 HAT-4D 使用的 encoder 定制版本，不是官方标准
+`sv4d2.safetensors`。仅重命名其他 checkpoint 不能兼容。该权重的公开下载页和
+模型许可证仍待发布；发布之前，外部用户无法复现 ROI 初始化流程。
+正确文件大小为 12,117,981,868 字节，SHA256 为
+`fa46c1d2101ad8cc32e6d3cc4513e1c083f4e2729935467e3d42a57a88a6403a`。
 
 在仓库根目录下载 L4GM 和 Segment Anything 官方权重：
 

@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 import math
 import numpy as np
 from inspect import isfunction
@@ -63,7 +64,6 @@ def timestep_embedding(timesteps, dim, max_period=10000, repeat_only=False):
             )
     else:
         embedding = repeat(timesteps, "b -> b d", d=dim)
-    # import pdb; pdb.set_trace()
     return embedding
 
 
@@ -759,7 +759,6 @@ class MultiViewUNetModel(ModelMixin, ConfigMixin):
             if isinstance(self.num_classes, int):
                 self.label_emb = nn.Embedding(self.num_classes, time_embed_dim)
             elif self.num_classes == "continuous":
-                # print("setting up linear c_adm embedding layer")
                 self.label_emb = nn.Linear(1, time_embed_dim)
             elif self.num_classes == "sequential":
                 assert adm_in_channels is not None
@@ -938,7 +937,6 @@ class MultiViewUNetModel(ModelMixin, ConfigMixin):
             self.id_predictor = nn.Sequential(
                 nn.GroupNorm(32, ch),
                 conv_nd(dims, model_channels, n_embed, 1),
-                # nn.LogSoftmax(dim=1)  # change to cross_entropy and produce non-normalized logits
             )
 
     def forward(

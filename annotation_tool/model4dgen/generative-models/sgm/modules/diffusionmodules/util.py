@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 """
 partially adopted from
 https://github.com/openai/improved-diffusion/blob/main/improved_diffusion/gaussian_diffusion.py
@@ -148,7 +149,6 @@ class MixedCheckpointFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *output_grads):
-        # additional_args = {key: ctx.input_tensors[key] for key in ctx.input_tensors if not isinstance(ctx.input_tensors[key],torch.Tensor)}
         ctx.input_tensors = {
             key: ctx.input_tensors[key].detach().requires_grad_(True)
             for key in ctx.input_tensors
@@ -162,7 +162,6 @@ class MixedCheckpointFunction(torch.autograd.Function):
                 key: ctx.input_tensors[key].view_as(ctx.input_tensors[key])
                 for key in ctx.input_tensors
             }
-            # shallow_copies.update(additional_args)
             output_tensors = ctx.run_function(**shallow_copies, **ctx.input_non_tensors)
         input_grads = torch.autograd.grad(
             output_tensors,

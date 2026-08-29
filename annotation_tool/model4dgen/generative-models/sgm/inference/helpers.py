@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 import math
 import os
 from typing import List, Optional, Union
@@ -37,8 +38,6 @@ class WatermarkEmbedder:
         image_np = rearrange(
             (255 * image).detach().cpu(), "n b c h w -> (n b) h w c"
         ).numpy()[:, :, :, ::-1]
-        # torch (b, c, h, w) in [0, 1] -> numpy (b, h, w, c) [0, 255]
-        # watermarking libary expects input as cv2 BGR format
         for k in range(image_np.shape[0]):
             image_np[k] = self.encoder.encode(image_np[k], "dwtDct")
         image = torch.from_numpy(
@@ -51,9 +50,7 @@ class WatermarkEmbedder:
 
 
 # A fixed 48-bit message that was choosen at random
-# WATERMARK_MESSAGE = 0xB3EC907BB19E
 WATERMARK_MESSAGE = 0b101100111110110010010000011110111011000110011110
-# bin(x)[2:] gives bits of x as str, use int to convert them to 0/1
 WATERMARK_BITS = [int(bit) for bit in bin(WATERMARK_MESSAGE)[2:]]
 embed_watermark = WatermarkEmbedder(WATERMARK_BITS)
 

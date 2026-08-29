@@ -1,6 +1,6 @@
 # HAT-4D Annotation Tool UI Guide
 
-[Chinese](ui_README_ch.md) | [Back to HAT-4D](README.md) | [Installation and launch guide](annotation_tool/README_eng.md)
+[Chinese](ui_README_ch.md) | [Back to HAT-4D](../README.md) | [Installation and launch guide](../annotation_tool/README_eng.md)
 
 This guide explains how to initialize 3D objects, propagate a 4D Gaussian
 sequence, and repair failed intermediate frames in the Viser frontend after all

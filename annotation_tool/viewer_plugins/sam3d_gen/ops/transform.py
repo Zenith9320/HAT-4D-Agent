@@ -19,9 +19,7 @@ if TYPE_CHECKING:
 class TransformMixin:
     """Mixin class providing BBox transform functionality."""
 
-    # ----------------------------
     # BBox transform (object-local)
-    # ----------------------------
     def _rotation_matrix_from_wxyz(self, wxyz: np.ndarray) -> np.ndarray:
         w, x, y, z = [float(v) for v in wxyz]
         return np.array(

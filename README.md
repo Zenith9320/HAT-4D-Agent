@@ -6,7 +6,7 @@
 
 **ECCV 2026**
 
-[![arXiv](https://img.shields.io/badge/arXiv-2606.28215-b31b1b.svg)](https://arxiv.org/pdf/2606.28215) [![Project Page](https://img.shields.io/badge/Project-HAT--4D-2b6cb0.svg)](https://lijiaxin0111.github.io/HAT4D/) [![Hugging Face Dataset](https://img.shields.io/badge/🤗%20Dataset-MVOIK--4D-yellow.svg)](https://huggingface.co/datasets/Lijiaxin0111/MVOIK-4D) [![Python](https://img.shields.io/badge/Python-3.10-blue.svg)](https://www.python.org/) [![PyTorch](https://img.shields.io/badge/PyTorch-2.1.0-ee4c2c.svg)](https://pytorch.org/) [![License](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
+[![arXiv](https://img.shields.io/badge/arXiv-2606.28215-b31b1b.svg)](https://arxiv.org/pdf/2606.28215) [![Project Page](https://img.shields.io/badge/Project-HAT--4D-2b6cb0.svg)](https://lijiaxin0111.github.io/HAT4D/) [![Hugging Face Dataset](https://img.shields.io/badge/🤗%20Dataset-MVOIK--4D-yellow.svg)](https://huggingface.co/datasets/Lijiaxin0111/MVOIK-4D) [![Code License](https://img.shields.io/badge/Code%20License-Apache--2.0-green.svg)](LICENSE)
 
 </div>
 
@@ -60,22 +60,27 @@ cd HAT-4D-Lifting-Monocular-Video-for-4D-Multi-Object-Interactions-via-Human-Age
 python annotation_tool/scripts/install_external_dependencies.py \
   --only sam-3d-objects \
   --only segment-anything \
-  --only Qwen3-VL
+  --only Qwen3-VL \
+  --only openai-clip
 
 # Verify every checkout against annotation_tool/external_dependencies.json.
 python annotation_tool/scripts/install_external_dependencies.py --check
 ```
 
-The installer clones SAM 3D Objects, Segment Anything, and Qwen3-VL at pinned
-commits. Do not replace these revisions with arbitrary branch heads. Qwen3-VL
-source is optional when an existing OpenAI-compatible Qwen endpoint is used.
-The modified L4GM/MoGA and SV4D2 inference sources are already included in this
-repository.
+The installer clones SAM 3D Objects, Segment Anything, Qwen3-VL, and OpenAI
+CLIP at pinned commits. Do not replace these revisions with arbitrary branch
+heads. Qwen3-VL source is optional when an existing OpenAI-compatible Qwen
+endpoint is used. The modified L4GM/MoGA and SV4D2 inference sources are
+already included in this repository.
 
 ### 2. Create isolated environments
 
 The ROI/L4GM and SAM3D stacks have different CUDA constraints and should not be
 installed into one environment.
+
+The source-tested ROI stack uses Python 3.11, PyTorch 2.7.0, Torchvision 0.22.0,
+and CUDA 12.8 wheels. SAM3D remains in its upstream CUDA 12.1 environment; do
+not install both stacks into one environment.
 
 ```bash
 # Frontend.
@@ -85,10 +90,14 @@ python -m pip install --upgrade pip
 python -m pip install -r annotation_tool/requirements.txt
 
 # ROI/L4GM backend.
-conda create -n hat4d-roi python=3.10 -y
+conda create -n hat4d-roi python=3.11 -y
 conda activate hat4d-roi
 python -m pip install --upgrade pip
+python -m pip install torch==2.7.0 torchvision==0.22.0 \
+  --index-url https://download.pytorch.org/whl/cu128
 python -m pip install -r annotation_tool/requirements.txt
+python -m pip install 'setuptools<81'
+python -m pip install --no-build-isolation -e annotation_tool/thirdparty/CLIP
 python -m pip install -r annotation_tool/requirements_roi.txt
 ```
 
@@ -116,6 +125,25 @@ modified Viser checkout is optional. The public installation uses
 `viser==1.0.30`; custom keyboard shortcuts are disabled gracefully when its
 non-standard `ClientHandle.on_key()` API is unavailable.
 
+### Backend access control
+
+The model APIs bind to loopback by default. Before starting the backends and
+frontend, set one shared token in every terminal. Paths outside this repository
+must be explicitly listed in `HAT4D_ALLOWED_ROOTS` using the platform path
+separator (`:` on Linux):
+
+```bash
+export HAT4D_TOKEN_FILE="${XDG_RUNTIME_DIR:-/tmp}/hat4d-${UID}.token"
+test -s "$HAT4D_TOKEN_FILE" || (umask 077 && openssl rand -hex 32 > "$HAT4D_TOKEN_FILE")
+export HAT4D_API_TOKEN="$(cat "$HAT4D_TOKEN_FILE")"
+export HAT4D_ALLOWED_ROOTS="$PWD:/path/to/input-data:/path/to/results"
+```
+
+Health endpoints remain unauthenticated. All other backend requests use the
+shared token. A backend refuses to bind to a non-loopback address without it.
+The Viser frontend itself has no authentication layer and always refuses a
+non-loopback bind; use an authenticated tunnel or notebook proxy for remote use.
+
 QwenVL is optional for manual annotation. To host it locally, create a separate
 environment and install an SGLang build compatible with the GPU and checkpoint:
 
@@ -139,10 +167,18 @@ hf auth login
 | Checkpoint | Destination | Source |
 | --- | --- | --- |
 | L4GM reconstruction | `annotation_tool/model4dgen/L4GM_MoGA/pretrained/recon.safetensors` | `jiawei011/L4GM` |
-| HAT-4D SV4D2 encoder variant | `annotation_tool/model4dgen/generative-models/checkpoints/sv4d2.0/sv4d2_with_first_stage_encoder_v2.safetensors` | HAT-4D model release |
+| HAT-4D SV4D2 encoder variant | `annotation_tool/model4dgen/generative-models/checkpoints/sv4d2.0/sv4d2_with_first_stage_encoder_v2.safetensors` | Pending public HAT-4D model release; not currently downloadable from this repository |
 | Segment Anything ViT-H | `annotation_tool/checkpoints/sam/sam_vit_h_4b8939.pth` | Meta Segment Anything |
 | SAM 3D Objects | `annotation_tool/viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects/checkpoints/hf/pipeline.yaml` plus sibling files | gated `facebook/sam-3d-objects` repository |
 | Qwen3-VL | any directory containing `config.json` | Qwen model repository, or an external compatible service |
+
+The expected HAT-4D SV4D2 encoder checkpoint is 12,117,981,868 bytes with
+SHA256 `fa46c1d2101ad8cc32e6d3cc4513e1c083f4e2729935467e3d42a57a88a6403a`.
+Verify it after the public model release becomes available:
+
+```bash
+sha256sum annotation_tool/model4dgen/generative-models/checkpoints/sv4d2.0/sv4d2_with_first_stage_encoder_v2.safetensors
+```
 
 Download the publicly hosted weights:
 
@@ -168,7 +204,7 @@ rm -rf "$SAM3D_ROOT/checkpoints/hf-download"
 
 The HAT-4D SV4D2 encoder checkpoint is not the upstream
 `stabilityai/sv4d2.0` `sv4d2.safetensors` file. Obtain the encoder-variant
-checkpoint from the HAT-4D model release and keep its exact filename; renaming
+checkpoint from the pending HAT-4D model release and keep its exact filename; renaming
 the upstream checkpoint does not make it compatible. Review every model license
 before downloading or redistributing weights.
 
@@ -270,7 +306,10 @@ If you find this project useful for your research, please cite:
 ```bibtex
 @inproceedings{Li2026hat4d,
   title     = {HAT-4D: Lifting Monocular Video for 4D Multi-Object Interactions via Human-Agent Collaboration},
-  author    = {Li, Jiaxin and Author, Second and Author, Third},
+  author    = {Li, Jiaxin and Wu, Yuxiang and Zhang, Zhenkai and Shi, Xinrui and
+               Wang, Haoyuan and Zhao, Yichen and Su, Linxiang and Yu, Chenyang and
+               Zhang, Mingyu and Ding, Yifan and Wen, Boran and Zhang, Li and
+               Liu, Ruiyang and Li, Yong-Lu},
   booktitle = {Computer Vision -- ECCV 2026},
   year      = {2026},
   note      = {Accepted, to appear}

@@ -19,7 +19,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# from core.options_conf import Options
 
 import kiui
 

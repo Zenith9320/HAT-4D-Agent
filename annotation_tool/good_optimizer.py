@@ -395,7 +395,6 @@ class FixOptimizer:
         selected_mask: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         if gsplat_rasterization is not None:
-            # try:
             return self._render_visibility_mask_gsplat(
                 means,
                 scales,
@@ -409,7 +408,6 @@ class FixOptimizer:
                 fov_deg,
                 selected_mask,
             )
-            # except Exception as exc:  # noqa: BLE001
         return self._render_visibility_mask_simple(
             means,
             scales,
@@ -836,7 +834,6 @@ class FixOptimizer:
 
         opt_params = payload.get("opt_params", {})
         iters = int(opt_params.get("iters", 1500))
-        # iters = int(opt_params.get("iters", 2000)) # For debug
         lr_color = float(opt_params.get("lr_color", 0.0025))
         lr_opacity = float(opt_params.get("lr_opacity", 0.05))
         lr_scale = float(opt_params.get("lr_scale", 0.005))
@@ -1734,9 +1731,7 @@ class FixOptimizer:
                     sh_dc_sel.clamp_(min=-sh_clip, max=sh_clip)
             loss_curve.append(float(loss.detach().cpu().item()))
 
-            # =========================
             # GS split: after step
-            # =========================
             if split_enable and (it >= split_start) and (split_every > 0) and (it % split_every == 0):
                 # Gradients remain available after optimizer.step() for split scoring.
                 grad_means = means_sel.grad.detach().clone() if (means_sel.requires_grad and means_sel.grad is not None) else None
@@ -2249,8 +2244,6 @@ class FixOptimizer:
         }
 
         center_target = payload.get("center_target", [0.0, 0.0, 0.0])
-        # center_np, radius = compute_center_radius(centers_np)
-        # depth = float(payload.get("camera_depth", max(1.2, radius * 1.6)))
 
 
 
@@ -2273,7 +2266,6 @@ class FixOptimizer:
         height, width = anchor_np.shape[:2]
         anchor_t = torch.from_numpy(anchor_np.astype(np.float32) / 255.0).to(self.device).permute(2, 0, 1)
 
-        # eye_anchor, wxyz_anchor = _pose_for_view(anchor_view, 0.0, 0.0)
         eye_anchor, wxyz_anchor = self._camera_pose_for_view(anchor_view, center_target, depth=1.5, up_axis=up_axis)
         rotation_anchor = self._camera_to_world_rotation(wxyz_anchor.tolist())
 
@@ -2305,7 +2297,6 @@ class FixOptimizer:
             return torch.from_numpy(render_np.astype(np.float32)).to(self.device).permute(2, 0, 1)
 
         for yaw_off, pitch_off in tilt_offsets:
-            # eye_tilt, wxyz_tilt = _pose_for_view(anchor_view, yaw_off, pitch_off)
             eye_tilt, wxyz_tilt = self._camera_pose_for_view(
                 anchor_view, center_target, depth=1.5, up_axis=up_axis, yaw_off=yaw_off, pitch_off=pitch_off
             )

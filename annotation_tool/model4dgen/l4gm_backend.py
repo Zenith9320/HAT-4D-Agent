@@ -36,7 +36,7 @@ from .L4GM_MoGA.core.options_conf import config_defaults
 from .L4GM_MoGA.core_free_fn.models import LGM
 from .L4GM_MoGA.mvdream.pipeline_mvdream import MVDreamPipeline
 from .L4GM_MoGA.core.options_conf import Options
-from .L4GM_MoGA.utils.train_utils import seed_everything
+from .runtime_utils import seed_everything
 from .L4GM_MoGA.core.gs import GaussianRenderer
 from .L4GM_MoGA.utils.gpu_utils import print_gpu_memory
 
@@ -128,12 +128,9 @@ class L4GMGenerator:
 
         with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
 
-            # --------------------------------------------------
             # build minimal gaussian: [1, 1, 14]
-            # --------------------------------------------------
             gaussians = torch.zeros((1, 1, 14), device=device, dtype=torch.float32)
 
-            # xyz (in front of camera)
             gaussians[..., 0:3] = torch.tensor([[0.0, 0.0, 2.0]], device=device)
 
             # opacity
@@ -142,15 +139,11 @@ class L4GMGenerator:
             # scale
             gaussians[..., 4:7] = 0.05
 
-            # quaternion (identity, wxyz)
             gaussians[..., 7:11] = torch.tensor([[1.0, 0.0, 0.0, 0.0]], device=device)
 
-            # rgb (red point)
             gaussians[..., 11:14] = torch.tensor([[1.0, 0.0, 0.0]], device=device)
 
-            # --------------------------------------------------
             # build camera
-            # --------------------------------------------------
             cam_poses = torch.from_numpy(
                 orbit_camera(0, 0, radius=opt.cam_radius, opengl=True)
             ).unsqueeze(0).to(device)
@@ -163,9 +156,7 @@ class L4GMGenerator:
 
             bg_color = torch.tensor([1.0, 1.0, 1.0], device=device)
 
-            # --------------------------------------------------
             # trigger rasterization (CUDA compile happens here)
-            # --------------------------------------------------
             _ = self.model.gs.render(
                 gaussians,
                 cam_view.unsqueeze(0),        # [B=1, V=1, 4,4]
@@ -612,7 +603,6 @@ class L4GMGenerator:
 
         gaussians_aligned = self._rotate_gaussians_y(gaussians, best_azimuth)
 
-        # self._save_ply(gaussians, out_ply)
         self._save_ply(gaussians_aligned, out_ply)
         print_gpu_memory()
         return {

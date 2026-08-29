@@ -2,6 +2,8 @@ import importlib.util
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER_PATH = ROOT / "scripts" / "check_publication.py"
@@ -54,7 +56,33 @@ def test_checker_accepts_clean_english_source(tmp_path: Path) -> None:
     assert checker.scan_paths([tmp_path]) == []
 
 
-def test_checker_still_scans_vendored_source_for_internal_paths(tmp_path: Path) -> None:
+def test_checker_rejects_stale_release_source(tmp_path: Path) -> None:
+    checker = _load_checker()
+    (tmp_path / "models_abandon.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    findings = checker.scan_paths([tmp_path])
+
+    assert {finding.kind for finding in findings} == {"stale-source"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "models_viz_tmp_1215_synced.py",
+        "provider_objaverse_4d.py",
+        "provider_objaverse_4d_conf_v2.py",
+        "provider_Memory4d_split.py",
+        "train_utils.py",
+    ],
+)
+def test_checker_rejects_each_known_stale_source(tmp_path: Path, name: str) -> None:
+    checker = _load_checker()
+    (tmp_path / name).write_text("VALUE = 1\n", encoding="utf-8")
+
+    assert {finding.kind for finding in checker.scan_paths([tmp_path])} == {"stale-source"}
+
+
+def test_checker_scans_vendored_source_for_paths_and_chinese_comments(tmp_path: Path) -> None:
     checker = _load_checker()
     vendored = tmp_path / "model4dgen" / "L4GM_MoGA"
     vendored.mkdir(parents=True)
@@ -67,7 +95,16 @@ def test_checker_still_scans_vendored_source_for_internal_paths(tmp_path: Path) 
 
     findings = checker.scan_paths([tmp_path])
 
-    assert {finding.kind for finding in findings} == {"internal-path"}
+    assert {finding.kind for finding in findings} == {"internal-path", "chinese-comment"}
+
+
+def test_checker_detects_broken_local_markdown_links(tmp_path: Path) -> None:
+    checker = _load_checker()
+    (tmp_path / "README.md").write_text("[missing](docs/missing.md)\n", encoding="utf-8")
+
+    findings = checker.scan_paths([tmp_path])
+
+    assert {finding.kind for finding in findings} == {"broken-link"}
 
 
 def test_checker_detects_home_relative_internal_paths(tmp_path: Path) -> None:

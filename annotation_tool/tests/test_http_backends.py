@@ -53,11 +53,14 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _post_json(url: str, payload: dict) -> tuple[int, str, dict]:
+def _post_json(url: str, payload: dict, token: str | None = None) -> tuple[int, str, dict]:
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["X-HAT4D-Token"] = token
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -110,7 +113,16 @@ def test_backend_health_only_server(
 ) -> None:
     port = _free_port()
     process = subprocess.Popen(
-        [PYTHON, "-m", module_name, "--health-only", "--port", str(port)],
+        [
+            PYTHON,
+            "-m",
+            module_name,
+            "--health-only",
+            "--port",
+            str(port),
+            "--api-token",
+            "test-token",
+        ],
         cwd=ROOT,
         env=PYTHON_ENV,
         stdout=subprocess.PIPE,
@@ -139,18 +151,27 @@ def test_backend_health_only_server(
         status, content_type, error_payload = _post_json(
             f"http://127.0.0.1:{port}/unknown",
             {},
+            token="test-token",
         )
         assert status == 404
         assert content_type.startswith("application/json")
         assert isinstance(error_payload, dict)
 
         path, probe_payload = ERROR_PROBES[module_name]
-        status, content_type, error_payload = _post_json(
+        status, _, error_payload = _post_json(
             f"http://127.0.0.1:{port}{path}",
             probe_payload,
         )
+        assert status == 401
+        assert "unauthorized" in json.dumps(error_payload).lower()
+
+        status, content_type, error_payload = _post_json(
+            f"http://127.0.0.1:{port}{path}",
+            probe_payload,
+            token="test-token",
+        )
         serialized = json.dumps(error_payload).lower()
-        assert status == 500
+        assert status == 403
         assert content_type.startswith("application/json")
         assert "traceback" not in serialized
         assert "/private/hat4d-secret" not in serialized

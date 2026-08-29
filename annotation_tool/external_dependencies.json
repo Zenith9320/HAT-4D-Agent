@@ -16,5 +16,11 @@
     "path": "viewer_plugins/vlm_assistor/thirdparty/Qwen3-VL",
     "url": "https://github.com/QwenLM/Qwen3-VL.git",
     "revision": "96588727e44c78b25ba03ea03b8e12f7e64fd0da"
+  },
+  {
+    "name": "openai-clip",
+    "path": "thirdparty/CLIP",
+    "url": "https://github.com/openai/CLIP.git",
+    "revision": "dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1"
   }
 ]

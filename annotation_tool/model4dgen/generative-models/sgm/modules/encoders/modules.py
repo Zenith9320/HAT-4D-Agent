@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 import math
 from contextlib import nullcontext
 from functools import partial
@@ -696,8 +697,6 @@ class FrozenOpenCLIPImageEmbedder(AbstractEmbModel):
         return z
 
     def encode_with_vision_transformer(self, img):
-        # if self.max_crops > 0:
-        #    img = self.preprocess_by_cropping(img)
         if img.dim() == 5:
             assert self.max_crops == img.shape[1]
             img = rearrange(img, "b n c h w -> (b n) c h w")

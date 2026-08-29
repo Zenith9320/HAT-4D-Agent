@@ -129,9 +129,7 @@ class Sam3DGenOpsBase:
         except Exception:
             return False
 
-    # ----------------------------
     # Camera locking
-    # ----------------------------
     def _snapshot_camera(self, client) -> None:
         self.state.locked_pose[client.client_id] = {
             "wxyz": np.asarray(client.camera.wxyz, dtype=np.float32).copy(),
@@ -152,9 +150,7 @@ class Sam3DGenOpsBase:
             client.camera.up_direction = pose["up_direction"]
             client.camera.fov = pose["fov"]
 
-    # ----------------------------
     # Status helpers
-    # ----------------------------
     def _set_sam_status(self, status: str) -> None:
         self.state.sam_status = str(status)
         if self.state.sam_status_handle is not None:
@@ -171,9 +167,7 @@ class Sam3DGenOpsBase:
             except Exception:
                 pass
 
-    # ----------------------------
     # UI setters
-    # ----------------------------
     def set_interaction_mode(self, mode: str) -> None:
         mode = "transform" if mode == "transform" else "segment"
         self.state.interaction_mode = mode
@@ -214,9 +208,7 @@ class Sam3DGenOpsBase:
         self.state.eraser_radius_px = int(max(1, radius_px))
         self._refresh_frustum_image()
 
-    # ----------------------------
     # Public actions
-    # ----------------------------
     def begin(self, client) -> None:
         app = self._app()
         import time as _time
@@ -524,9 +516,7 @@ class Sam3DGenOpsBase:
         self.set_manual_object_scale(client, new)
         return new
 
-    # ----------------------------
     # Helpers
-    # ----------------------------
     def _cur_object(self) -> Sam3DObjectState:
         return self.state.objects[self.state.current_object_idx]
 

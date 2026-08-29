@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tokenize
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -45,6 +46,14 @@ GENERATED_NAMES = {
     "results_workspace",
     "tmp",
     "workspace",
+}
+PROHIBITED_RELEASE_NAMES = {
+    "models_abandon.py",
+    "models_viz_tmp_1215_synced.py",
+    "provider_objaverse_4d.py",
+    "provider_objaverse_4d_conf_v2.py",
+    "provider_Memory4d_split.py",
+    "train_utils.py",
 }
 VENDORED_SOURCE_PREFIXES = (
     "model4dgen/L4GM_MoGA/",
@@ -139,6 +148,8 @@ def _scan_python_text(
     relative_path: str,
     source: str,
     multilingual_allowlist: dict[str, str],
+    *,
+    check_commented_code: bool = True,
 ) -> list[Finding]:
     findings: list[Finding] = []
     doc_lines = _docstring_lines(source)
@@ -166,6 +177,8 @@ def _scan_python_text(
                 )
     except (IndentationError, tokenize.TokenError):
         pass
+    if not check_commented_code:
+        return findings
     block_start = 0
     code_line_count = 0
     for line_number, line in enumerate([*source.splitlines(), ""], start=1):
@@ -210,9 +223,27 @@ def _scan_text_file(
             findings.append(
                 Finding("credential", path, line_number, "possible hard-coded credential")
             )
+        if path.suffix.lower() == ".md":
+            for raw_target in re.findall(r"!?\[[^\]]*\]\(([^)\s]+)", line):
+                target = urllib.parse.unquote(raw_target.strip("<>"))
+                if target.startswith(("#", "http://", "https://", "mailto:")):
+                    continue
+                local_target = target.split("#", 1)[0].split("?", 1)[0]
+                if local_target and not (path.parent / local_target).resolve().exists():
+                    findings.append(
+                        Finding("broken-link", path, line_number, f"missing local target: {target}")
+                    )
     is_vendored_source = relative_path.startswith(VENDORED_SOURCE_PREFIXES)
-    if path.suffix.lower() == ".py" and not is_vendored_source:
-        findings.extend(_scan_python_text(path, relative_path, source, multilingual_allowlist))
+    if path.suffix.lower() == ".py":
+        findings.extend(
+            _scan_python_text(
+                path,
+                relative_path,
+                source,
+                multilingual_allowlist,
+                check_commented_code=not is_vendored_source,
+            )
+        )
     return findings
 
 
@@ -286,6 +317,10 @@ def scan_paths(
                 findings.append(Finding("generated-path", path, 0, "generated or local-only path"))
                 if path.is_dir():
                     continue
+            if path.name in PROHIBITED_RELEASE_NAMES:
+                findings.append(
+                    Finding("stale-source", path, 0, "deprecated or non-runnable source file")
+                )
             if not path.is_file():
                 continue
             try:

@@ -1,6 +1,4 @@
-"""
-实现SVG2的语义
-"""
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 
 import sys
 from typing import Optional

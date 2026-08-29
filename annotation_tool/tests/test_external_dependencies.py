@@ -51,6 +51,10 @@ def test_installable_lock_contains_only_publicly_reproducible_sources() -> None:
             "https://github.com/QwenLM/Qwen3-VL.git",
             "96588727e44c78b25ba03ea03b8e12f7e64fd0da",
         ),
+        "openai-clip": (
+            "https://github.com/openai/CLIP.git",
+            "dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1",
+        ),
     }
 
 

@@ -44,6 +44,16 @@ from utils.ply_utils import read_ply_vertices, write_ply_vertices
 from utils.ply_utils import load_splat_from_ply, splatdata_to_backend_dict
 from utils.camera_utils import direction_from_angles, eye_wxyz_from_angles
 from utils.ply_utils import read_ply_vertices as read_ply_vertices_simple
+from http_security import (
+    DEFAULT_MAX_REQUEST_BYTES,
+    RequestError,
+    parse_allowed_roots,
+    read_json_body,
+    request_is_authorized,
+    require_secure_bind,
+    validate_identifier,
+    validate_payload_paths,
+)
 
 
 try:
@@ -547,6 +557,7 @@ class SessionManager:
         }
 
     def status(self, session_id: str) -> Dict:
+        session_id = validate_identifier(session_id, "session_id")
         session_root = self._session_root_by_id.get(session_id) or (self.default_workspace_root / session_id)
         session_json = session_root / "session.json"
         if not session_json.exists():
@@ -556,6 +567,7 @@ class SessionManager:
         return record
 
     def _session_root(self, session_id: str) -> Path:
+        session_id = validate_identifier(session_id, "session_id")
         return self._session_root_by_id.get(session_id) or (self.default_workspace_root / session_id)
 
     def _load_record(self, session_id: str) -> Tuple[Path, Dict]:
@@ -1369,7 +1381,6 @@ class SessionManager:
         anchor_view = payload.get("anchor_view", "input")
         anchor_az, anchor_el = VIEW_PRESETS.get(anchor_view, (0.0, 0.0))
         sv4d_runs = int(payload.get("sv4d_runs", 5))
-        # sv4d_runs = int(payload.get("sv4d_runs", 2)) # For debug
         sv4d_batch_views = int(payload.get("sv4d_batch_views", 4))
         azimuths_rel = payload.get("azimuths")
         if azimuths_rel is None:
@@ -1387,9 +1398,6 @@ class SessionManager:
                     idx = offset * int(sv4d_runs) + group_id
                     if idx < len(novel_sorted):
                         reordered.append(novel_sorted[idx])
-            # for offset in range(int(sv4d_batch_views)):
-            #     for idx in range(offset, len(novel_sorted), int(sv4d_batch_views)):
-            #         reordered.append(novel_sorted[idx])
             azimuths = [anchor_azimuth] + reordered
 
         elevation_deg = float(payload.get("elevation_deg", anchor_el))
@@ -1429,7 +1437,6 @@ class SessionManager:
                 raise FileNotFoundError(f"Missing GS ply for frame {src_idx}: {ply_path}")
 
             data = self._load_gaussian_tensors(ply_path)
-            # center, radius = compute_center_radius(data["means"])
             center = np.zeros(3)
             radius = 1.5
             distance_use = radius
@@ -1538,9 +1545,6 @@ class SessionManager:
         ply_target = session_root / SESSION_GS_DIRNAME / f"{target_frame:06d}.ply"
         if not ply_target.exists():
             ply_target = session_root / SESSION_GS_DIRNAME / f"wo_interp_000000_{target_frame:03d}.ply"
-        # data_target = self._load_gaussian_tensors(ply_target)
-        # center_target, radius_target = compute_center_radius(data_target["means"])
-        # distance_target = max(1.5, float(radius_target * 1.5)) if radius_target > 0 else 1.5
 
         center_target = np.zeros(3)
         radius_target = 1.5
@@ -1578,7 +1582,6 @@ class SessionManager:
         optimize_after = bool(payload.get("optimize", True))
         opt_result: Dict | None = None
         if optimize_after:
-            # try:
             ply_path_final = session_root / SESSION_GS_DIRNAME / f"{target_frame:06d}.ply"
             if not ply_path_final.exists():
                 ply_path_final = session_root / SESSION_GS_DIRNAME / f"wo_interp_000000_{target_frame:03d}.ply"
@@ -1609,10 +1612,7 @@ class SessionManager:
 
             opt_output_dir = output_dir / "optimize"
             # Use the shared fixer instance so progress is visible to /fix_progress polling
-            # try:
             optimizer = ROIRequestHandler.fixer
-            # except Exception:
-            #     optimizer = FixOptimizer()
             opt_result = optimizer.optimize_with_views(
                 gs_ply=ply_path_final,
                 view_specs=view_specs,
@@ -1623,8 +1623,6 @@ class SessionManager:
                 experiment_id=payload.get("experiment_id"),
                 opt_params=payload.get("opt_params"),
             )
-            # except Exception as exc:  # noqa: BLE001
-            #     opt_result = {"status": "error", "message": str(exc)}
 
         return {
             "status": "success",
@@ -1748,6 +1746,15 @@ class ROIRequestHandler(BaseHTTPRequestHandler):
     selector = ROISelector()
     fixer: FixOptimizer | None = None
     sessions: SessionManager | None = None
+    api_token = ""
+    max_request_bytes = DEFAULT_MAX_REQUEST_BYTES
+    allowed_roots = parse_allowed_roots(ROOT.parent)
+
+    def _authorize(self) -> bool:
+        if request_is_authorized(self.headers, self.api_token):
+            return True
+        self._send_json({"status": "error", "message": "unauthorized"}, code=401)
+        return False
 
     @classmethod
     def _require_sessions(cls) -> SessionManager:
@@ -1781,12 +1788,13 @@ class ROIRequestHandler(BaseHTTPRequestHandler):
                 code=404,
             )
             return
-        content_length = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(content_length)
+        if not self._authorize():
+            return
         try:
-            payload = json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError as exc:
-            self._send_json({"status": "error", "message": f"Invalid JSON: {exc}"}, code=400)
+            payload = read_json_body(self, self.max_request_bytes)
+            validate_payload_paths(payload, self.allowed_roots)
+        except RequestError as exc:
+            self._send_json({"status": "error", "message": str(exc)}, code=exc.status)
             return
 
         try:
@@ -1829,6 +1837,8 @@ class ROIRequestHandler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
         if parsed.path in {"", "/", "/health"}:
             self._send_json(health_payload(), code=200)
+            return
+        if not self._authorize():
             return
         if parsed.path == "/session/status":
             session_id_list = qs.get("session_id")
@@ -1904,6 +1914,12 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Minimal ROI backend for GS selection.")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--api-token", default=os.environ.get("HAT4D_API_TOKEN", ""))
+    parser.add_argument(
+        "--max-request-bytes",
+        type=int,
+        default=DEFAULT_MAX_REQUEST_BYTES,
+    )
     parser.add_argument("--depth-margin-ratio", type=float, default=0.05)
     parser.add_argument("--min-depth-margin", type=float, default=0.01)
     parser.add_argument(
@@ -1924,6 +1940,7 @@ def parse_args(argv: List[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    require_secure_bind(args.host, args.api_token)
     ROIRequestHandler.selector = ROISelector(
         depth_margin_ratio=args.depth_margin_ratio,
         min_depth_margin=args.min_depth_margin,
@@ -1931,6 +1948,9 @@ def main() -> None:
 
     ROIRequestHandler.sessions = None
     ROIRequestHandler.fixer = None
+    ROIRequestHandler.api_token = str(args.api_token or "")
+    ROIRequestHandler.max_request_bytes = int(args.max_request_bytes)
+    ROIRequestHandler.allowed_roots = parse_allowed_roots(ROOT.parent)
     if not args.health_only:
         from good_optimizer import FixOptimizer
 

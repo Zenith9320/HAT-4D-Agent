@@ -1,3 +1,4 @@
+# Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 import logging
 import math
 from inspect import isfunction
@@ -56,7 +57,6 @@ except:
     XFORMERS_IS_AVAILABLE = False
     logpy.warn("no module 'xformers'. Processing without...")
 
-# from .diffusionmodules.util import mixed_checkpoint as checkpoint
 
 
 def exists(val):
@@ -185,9 +185,6 @@ class SelfAttention(nn.Module):
             qkv = rearrange(
                 qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads
             ).float()
-            # qkv = rearrange(
-            #     qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads
-            # ) # Jiaxin
             q, k, v = qkv[0], qkv[1], qkv[2]  # B H L D
             x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
             x = rearrange(x, "B H L D -> B L (H D)")
@@ -373,7 +370,6 @@ class CrossAttention(nn.Module):
         """
         ## new
         with sdp_kernel(**BACKEND_MAP[self.backend]):
-            # print("dispatching into backend", self.backend, "q/k/v shape: ", q.shape, k.shape, v.shape)
             out = F.scaled_dot_product_attention(
                 q, k, v, attn_mask=mask
             )  # scale is dim_head ** -0.5 per default
@@ -473,7 +469,6 @@ class MemoryEfficientCrossAttention(nn.Module):
         if n_times_crossframe_attn_in_self:
             # reprogramming cross-frame attention as in https://arxiv.org/abs/2303.13439
             assert x.shape[0] % n_times_crossframe_attn_in_self == 0
-            # n_cp = x.shape[0]//n_times_crossframe_attn_in_self
             k = repeat(
                 k[::n_times_crossframe_attn_in_self],
                 "b ... -> (b n) ...",
@@ -622,11 +617,8 @@ class BasicTransformerBlock(nn.Module):
                 {"n_times_crossframe_attn_in_self": n_times_crossframe_attn_in_self}
             )
 
-        # return mixed_checkpoint(self._forward, kwargs, self.parameters(), self.checkpoint)
         if self.checkpoint:
-            # inputs = {"x": x, "context": context}
             return checkpoint(self._forward, x, context)
-            # return checkpoint(self._forward, inputs, self.parameters(), self.checkpoint)
         else:
             return self._forward(**kwargs)
 
@@ -688,8 +680,6 @@ class BasicTransformerSingleLayerBlock(nn.Module):
         self.checkpoint = checkpoint
 
     def forward(self, x, context=None):
-        # inputs = {"x": x, "context": context}
-        # return checkpoint(self._forward, inputs, self.parameters(), self.checkpoint)
         return checkpoint(self._forward, x, context)
 
     def _forward(self, x, context=None):
@@ -720,7 +710,6 @@ class SpatialTransformer(nn.Module):
         use_linear=False,
         attn_type="softmax",
         use_checkpoint=True,
-        # sdp_backend=SDPBackend.FLASH_ATTENTION
         sdp_backend=None,
     ):
         super().__init__()
@@ -777,7 +766,6 @@ class SpatialTransformer(nn.Module):
                 nn.Conv2d(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
             )
         else:
-            # self.proj_out = zero_module(nn.Linear(in_channels, inner_dim))
             self.proj_out = zero_module(nn.Linear(inner_dim, in_channels))
         self.use_linear = use_linear
 

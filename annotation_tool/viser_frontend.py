@@ -34,6 +34,7 @@ if VISER_SRC.exists() and str(VISER_SRC) not in sys.path:
 import viser  # noqa: E402
 import viser.transforms as tf  # noqa: E402
 from viser._assignable_props_api import colors_to_uint8  # noqa: E402
+from http_security import client_headers, is_loopback_host  # noqa: E402
 
 from viewer_plugins.manual_edit import ManualEditPlugin  # noqa: E402
 from viewer_plugins.sam3d_gen import Sam3DGenPlugin  # noqa: E402
@@ -451,7 +452,6 @@ class ViewerApp:
         self.fov_deg = fov_deg
         self.server_host = str(server_host)
         self.server_port = int(server_port)
-        # assert up_axis in ("y", "z"), "up_axis must be 'y' or 'z'"
         self.up_axis = up_axis
         self.up_vec = up_vector(up_axis)
         self.flip_colmap = flip_colmap
@@ -1696,7 +1696,6 @@ class ViewerApp:
         def _handle_gen_first() -> None:
             if not self.backend_url:
                 return
-            # try:
             self._ensure_session(client)
             self._start_metric_poll(client)
             resp = self._post_json(
@@ -2867,9 +2866,7 @@ class ViewerApp:
         except Exception:
             return None
 
-        # -----------------------------
         # Camera from viser (OpenGL)
-        # -----------------------------
         try:
             cam_pos = np.asarray(client.camera.position, dtype=np.float32)   # world
             cam_wxyz = np.asarray(client.camera.wxyz, dtype=np.float32)      # camera-to-world
@@ -2881,9 +2878,7 @@ class ViewerApp:
         width = int(self.image_size)
         height = int(self.image_size)
 
-        # -----------------------------
         # Build GS attributes from PLY
-        # -----------------------------
         centers = data.centers.astype(np.float32, copy=False)
         rotations = data.rotations.astype(np.float32, copy=False)
         scales = data.scales.astype(np.float32, copy=False)
@@ -2891,9 +2886,7 @@ class ViewerApp:
         rgbs = data.rgbs.astype(np.float32, copy=False)
 
 
-        # -----------------------------
         # Build OpenGL camera matrices
-        # -----------------------------
         # camera-to-world from viser
         R_cw = tf.SO3(cam_wxyz).as_matrix().astype(np.float32)
         t_cw = cam_pos.astype(np.float32)
@@ -2910,9 +2903,7 @@ class ViewerApp:
         T_wc = np.linalg.inv(T_cw).astype(np.float32)
 
         viewmat = torch.from_numpy(T_wc[None]).float()
-        # -----------------------------
         # OpenGL projection (L4GM style)
-        # -----------------------------
         tan_half_fov = np.tan(0.5 * np.deg2rad(float(self.fov_deg)))
         proj = np.zeros((4, 4), dtype=np.float32)
         proj[0, 0] = 1.0 / tan_half_fov
@@ -2930,9 +2921,7 @@ class ViewerApp:
             dtype=torch.float32,
         )
 
-        # -----------------------------
         # Torch tensors
-        # -----------------------------
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         means = torch.from_numpy(centers).to(device)
@@ -2944,9 +2933,6 @@ class ViewerApp:
         viewmats = viewmat.to(device)
         Ks = torch.stack([K]).to(device)
         bg = torch.tensor([1.0, 1.0, 1.0], dtype=torch.float32, device=device)
-        # -----------------------------
-        # Rasterization (OpenGL model)
-        # -----------------------------
         rendered_image_all, rendered_alpha_all, _ = rasterization(
             means=means,
             quats=quats,
@@ -3246,7 +3232,7 @@ class ViewerApp:
             req = urllib.request.Request(
                 url,
                 data=data,
-                headers={"Content-Type": "application/json"} if data is not None else {},
+                headers=client_headers(include_json=data is not None),
                 method=method.upper(),
             )
             try:
@@ -3346,7 +3332,6 @@ class ViewerApp:
             raise RuntimeError("session/start did not return paths.session_root")
         self.session_root = Path(session_root)
         # Retarget workspace GS dir to this session so ROI/Fix use generated PLYs.
-        #
         # New convention: session outputs live under session_root/gs_sequence.
         # For backwards compatibility (older backends), fall back to session_root/gs.
         session_gs_dir = self.session_root / "gs_sequence"
@@ -3866,7 +3851,7 @@ class ViewerApp:
             req = urllib.request.Request(
                 self.mvtap_url,
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers=client_headers(include_json=True),
                 method="POST",
             )
             with urllib.request.urlopen(req, timeout=60) as resp:
@@ -4234,7 +4219,8 @@ class ViewerApp:
                 while not stop_evt.is_set():
                     try:
                         query_url = f"{progress_url}?experiment_id={exp_id}"
-                        with urllib.request.urlopen(query_url, timeout=5) as resp:
+                        req = urllib.request.Request(query_url, headers=client_headers())
+                        with urllib.request.urlopen(req, timeout=5) as resp:
                             body = resp.read().decode("utf-8")
                         parsed = json.loads(body)
                         status = parsed.get("status")
@@ -4278,7 +4264,7 @@ class ViewerApp:
             req = urllib.request.Request(
                 archor_url,
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers=client_headers(include_json=True),
                 method="POST",
             )
             try:
@@ -4445,7 +4431,8 @@ class ViewerApp:
                 while not stop_evt.is_set():
                     try:
                         query_url = f"{progress_url}?experiment_id={exp_id}"
-                        with urllib.request.urlopen(query_url, timeout=5) as resp:
+                        req = urllib.request.Request(query_url, headers=client_headers())
+                        with urllib.request.urlopen(req, timeout=5) as resp:
                             body = resp.read().decode("utf-8")
 
                         parsed = json.loads(body)
@@ -4521,7 +4508,7 @@ class ViewerApp:
             req = urllib.request.Request(
                 sv4d_url,
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers=client_headers(include_json=True),
                 method="POST",
             )
             try:
@@ -4819,7 +4806,8 @@ class ViewerApp:
                 while not stop_event.is_set():
                     try:
                         query_url = f"{progress_url}?experiment_id={exp_id}"
-                        with urllib.request.urlopen(query_url, timeout=5) as resp:
+                        req = urllib.request.Request(query_url, headers=client_headers())
+                        with urllib.request.urlopen(req, timeout=5) as resp:
                             body = resp.read().decode("utf-8")
                         parsed = json.loads(body)
                         print(f"[Fix progress] {parsed}")
@@ -4879,7 +4867,7 @@ class ViewerApp:
             req = urllib.request.Request(
                 fix_url,
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers=client_headers(include_json=True),
                 method="POST",
             )
             try:
@@ -5590,6 +5578,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if not is_loopback_host(args.host):
+        raise ValueError(
+            "The Viser frontend has no built-in authentication and must bind to a loopback address"
+        )
     if bool(getattr(args, "no_flash_atten", False)):
         os.environ["SAM3D_NO_FLASH_ATTN"] = "1"
         # Explicitly select PyTorch SDPA attention backends for SAM3D.
