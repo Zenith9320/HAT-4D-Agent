@@ -1,0 +1,35 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Runtime output
+workspace/
+outputs/
+results/
+logs/
+debug/
+*.log
+
+# Model caches and weights
+.cache/
+.hf_cache/
+checkpoints/
+pretrained/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# External source installed by scripts/install_external_dependencies.py
+thirdparty/viser/
+viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects/
+viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects/thirdparty/segment-anything/
+viewer_plugins/vlm_assistor/thirdparty/VLM_toolkit_cross_gpfs/
+viewer_plugins/vlm_assistor/thirdparty/Qwen3-VL/
+
+# Local legacy/reference copies that are not part of the runtime
+model4dgen/L4GM_MoGA/core/models_abandon.py
+model4dgen/L4GM_MoGA/core/models_viz_tmp_1215_synced.py

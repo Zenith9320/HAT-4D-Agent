@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local agent instructions
+AGENT.md
+AGENTS.md
+
+tmp
+
+# HAT-4D runtime output
+/results/
+results/**

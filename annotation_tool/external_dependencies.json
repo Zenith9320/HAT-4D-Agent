@@ -1,0 +1,20 @@
+[
+  {
+    "name": "sam-3d-objects",
+    "path": "viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects",
+    "url": "https://github.com/facebookresearch/sam-3d-objects.git",
+    "revision": "f91db411c50efee93d8db7aeb323885650f6f722"
+  },
+  {
+    "name": "segment-anything",
+    "path": "viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects/thirdparty/segment-anything",
+    "url": "https://github.com/facebookresearch/segment-anything.git",
+    "revision": "6fdee8f2727f4506cfbbe553e23b895e27956588"
+  },
+  {
+    "name": "Qwen3-VL",
+    "path": "viewer_plugins/vlm_assistor/thirdparty/Qwen3-VL",
+    "url": "https://github.com/QwenLM/Qwen3-VL.git",
+    "revision": "96588727e44c78b25ba03ea03b8e12f7e64fd0da"
+  }
+]

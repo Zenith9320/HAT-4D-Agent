@@ -1,0 +1,30 @@
+# Install after requirements.txt in the dedicated ROI/L4GM environment.
+accelerate
+clip @ git+https://github.com/openai/CLIP.git
+diffusers
+einops
+fairscale
+fire
+gsplat
+huggingface-hub
+imageio[ffmpeg]
+invisible-watermark
+kornia
+lpips
+natsort
+onnxruntime
+open-clip-torch
+psutil
+pytorch-lightning
+pyyaml
+rembg
+roma
+scikit-image
+scikit-learn
+seaborn
+tensorboard
+timm
+torchdata
+transformers
+webdataset
+xformers

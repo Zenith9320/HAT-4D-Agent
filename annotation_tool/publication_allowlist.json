@@ -1,0 +1,24 @@
+{
+  "multilingual_string_files": [
+    {
+      "path": "viewer_plugins/vlm_assistor/vlm/client.py",
+      "reason": "Contains Chinese-language VLM prompt templates and translation mappings selected by the configured evaluation language."
+    },
+    {
+      "path": "viewer_plugins/vlm_assistor/backend_server.py",
+      "reason": "Contains provider-facing Chinese prompt templates used when the request language is Chinese."
+    },
+    {
+      "path": "viewer_plugins/vlm_assistor/agents/fourd_memory.py",
+      "reason": "Contains the Chinese version of the history-aware 4D quality evaluation prompt."
+    },
+    {
+      "path": "viewer_plugins/vlm_assistor/schemas.py",
+      "reason": "Accepts legacy Chinese JSON field names and range separators for backward-compatible workspace loading."
+    },
+    {
+      "path": "viewer_plugins/vlm_assistor/ui.py",
+      "reason": "Displays the native language name in the explicit Chinese/English prompt-language selector."
+    }
+  ]
+}

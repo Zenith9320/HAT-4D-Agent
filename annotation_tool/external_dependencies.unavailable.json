@@ -1,0 +1,9 @@
+[
+  {
+    "name": "VLM_toolkit_cross_gpfs",
+    "path": "viewer_plugins/vlm_assistor/thirdparty/VLM_toolkit_cross_gpfs",
+    "source_revision": "250b7a4d97edb211e2d8373d6db34c2e26887102",
+    "availability": "not-publicly-installable",
+    "reason": "The optional source-tested toolkit repository is not publicly readable; the HTTP VLM backend does not require it."
+  }
+]
