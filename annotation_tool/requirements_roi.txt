@@ -8,6 +8,7 @@ imageio[ffmpeg]==2.37.2
 invisible-watermark==0.2.0
 kornia==0.8.2
 open-clip-torch==3.2.0
+onnxruntime==1.29.0
 pytorch-lightning==2.6.1
 pyyaml==6.0.3
 rembg==2.0.72
