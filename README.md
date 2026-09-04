@@ -16,6 +16,7 @@
 
 ## News 🔥
 
+- **2026-09-04**: The HAT-4D [annotation tool](annotation_tool/README.md) has been released.
 - **2026-06-30**: The **MVOIK-4D** dataset has been released on [Hugging Face](https://huggingface.co/datasets/Lijiaxin0111/MVOIK-4D).
 - **2026-06-26**: HAT-4D is accepted to **ECCV 2026**.
 
