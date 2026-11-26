@@ -121,6 +121,10 @@ class L4GMGenerator:
         This will compile CUDA extensions and initialize kernels.
         """
 
+        if os.environ.get("HAT4D_SKIP_GSPLAT_WARMUP", "0") == "1":
+            print("[L4GMGenerator] Skipping gsplat renderer warmup (HAT4D_SKIP_GSPLAT_WARMUP=1)")
+            return
+
         print("[L4GMGenerator] Warming up gsplat renderer...")
 
         device = self.device
@@ -183,13 +187,29 @@ class L4GMGenerator:
         return model, rays_embeddings
 
     def _load_mvdream(self) -> MVDreamPipeline:
-        print("self.cache:", str(self.root / ".cache"))
+        model_source = os.getenv("MVDREAM_MODEL_PATH", "ashawkey/imagedream-ipmv-diffusers").strip()
+        cache_dir = Path(os.getenv("MVDREAM_CACHE_DIR", str(self.root / ".cache"))).expanduser()
+        local_only = os.getenv("MVDREAM_LOCAL_FILES_ONLY", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
+        if Path(model_source).is_absolute() and not Path(model_source).exists():
+            raise FileNotFoundError(
+                f"MVDream model directory not found: {model_source}. "
+                "Download ashawkey/imagedream-ipmv-diffusers and set MVDREAM_MODEL_PATH."
+            )
+        print(
+            f"[L4GMGenerator] Loading MVDream from {model_source} "
+            f"(cache={cache_dir}, local_files_only={local_only})"
+        )
         pipe = MVDreamPipeline.from_pretrained(
-            "ashawkey/imagedream-ipmv-diffusers",
+            model_source,
             torch_dtype=torch.float16,
             trust_remote_code=True,
-            cache_dir=str(self.root / ".cache"),
-            local_files_only=True,
+            cache_dir=str(cache_dir),
+            local_files_only=local_only,
         )
         return pipe.to(self.device)
 

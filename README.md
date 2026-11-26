@@ -1,337 +1,233 @@
-<div align="center">
+# Agent- and Physics-Guided HAT-4D
 
-# HAT-4D
+本仓库是在 HAT-4D 公开代码基础上独立开发的研究原型，用于从单目视频生成多物体 4D Gaussian 场景。它不是 HAT-4D 官方仓库，也不代表原作者维护的版本。
 
-### Lifting Monocular Video for 4D Multi-Object Interactions via Human-Agent Collaboration
+项目保留原项目的版权、引用和许可证要求，在原流程上增加了自动视频理解、交互知识图谱、对象分类、物理规划、自动分割与验证、时序记忆以及失败修复能力。
 
-**ECCV 2026**
+## 主要修改
 
-[![arXiv](https://img.shields.io/badge/arXiv-2606.28215-b31b1b.svg)](https://arxiv.org/pdf/2606.28215) [![Project Page](https://img.shields.io/badge/Project-HAT--4D-2b6cb0.svg)](https://lijiaxin0111.github.io/HAT4D/) [![Hugging Face Dataset](https://img.shields.io/badge/🤗%20Dataset-MVOIK--4D-yellow.svg)](https://huggingface.co/datasets/Lijiaxin0111/MVOIK-4D) [![Code License](https://img.shields.io/badge/Code%20License-Apache--2.0-green.svg)](LICENSE)
+### 1. 视频理解与 IKG
 
-</div>
+新增 Agent0，对视频帧进行分段理解并输出 Interaction Knowledge Graph（IKG）：
 
-<p align="center">
-  <img src="asset/teaser_new.jpg" width="95%" alt="HAT-4D teaser">
-</p>
+- 对象清单、对象类别和属性；
+- 阶段、事件、关系与约束；
+- 深度顺序和相对位置时间线；
+- 分段摘要与 segment memory。
 
-## News 🔥
+IKG 会继续传给位姿调整、物理规划和 4D 验证模块，而不是只作为日志保存。
 
-- **2026-09-04**: The HAT-4D [annotation tool](annotation_tool/README.md) has been released.
-- **2026-06-30**: The **MVOIK-4D** dataset has been released on [Hugging Face](https://huggingface.co/datasets/Lijiaxin0111/MVOIK-4D).
-- **2026-06-26**: HAT-4D is accepted to **ECCV 2026**.
+### 2. 自动分割与对象生成
 
-## Overview ✨
+新增 Agent1 自动生成 SAM 正负提示点，并结合以下规则筛选 mask：
 
-HAT-4D is an agentic framework for reconstructing 3D geometry, temporal dynamics, and physical interactions of multiple objects from a single monocular video. The project targets dynamic, in-the-wild object interactions where severe occlusion, depth ambiguity, and complex motion make conventional monocular 4D reconstruction difficult.
+- 正点覆盖与负点排除；
+- VLM 对目标完整性、额外对象和缺失部件的检查；
+- 颜色语义约束；
+- 多候选 mask 选择和失败重试。
 
-By integrating vision-language models with a multi-level human-in-the-loop feedback mechanism, HAT-4D resolves interaction-induced ambiguities during 3D generation and 4D propagation. The framework further serves as a scalable data engine for **MVOIK-4D**, an open-world benchmark for monocular 4D interaction reconstruction with evaluation focused on physical plausibility and temporal consistency.
+通过 mask 后调用 SAM3D 生成每个对象的初始 3D 表示。
 
-## Method 🧠
+### 3. 相对位姿与碰撞约束
 
-<p align="center">
-  <img src="asset/method_pipeline.jpg" width="95%" alt="HAT-4D method pipeline">
-</p>
+新增 Agent2 候选位姿搜索，综合检查：
 
-HAT-4D decomposes monocular interaction lifting into agent-assisted perception, human feedback, 3D asset generation, and temporally consistent 4D propagation. This design enables the system to recover physically plausible multi-object interactions without relying on expensive multi-camera capture setups.
+- 输入图像素对齐；
+- IKG 中的前后、上下和左右关系；
+- AABB 碰撞、穿透和边界；
+- 多物体深度顺序与视图居中程度。
 
-## Annotation Tool
+### 4. 对象分类与物理规划
 
-The HAT-4D annotation tool, its two model backends, QwenVL integration, and
-reproducible launch scripts are included under [`annotation_tool`](annotation_tool/README.md).
+新增 `PhysicsPlanningAgent`，根据对象外观、IKG 和运动证据估计连续物理属性，包括刚性、弹性、关节性、薄片性、拓扑稳定性和已观察形变，并选择：
 
-- [English installation and annotation guide](annotation_tool/README_eng.md)
-- [Chinese installation and annotation guide](annotation_tool/README_ch.md)
-- [English UI guide: SAM3D initialization, 4D propagation, and frame repair](docs/ui_README.md)
-- [Chinese UI guide](docs/ui_README_ch.md)
+- `rigid`
+- `elastic`
+- `articulated`
+- `cloth`
+- `free_deform`
 
-Model checkpoints and the full MVOIK-4D dataset are not bundled. Two reviewed
-demo subsets are included under [`asset/`](asset/README.md) for testing the
-annotation workflow; they are distributed under separate data terms. The
-instructions below provide the shortest tested setup path; the language-specific
-guides cover annotation, repair, and workspace recovery in detail.
+分类结果用于生成允许运动、禁止运动和物理约束。它不是独立展示用标签，而会参与后续 Gaussian 运动投影。
 
-## Installation
+### 5. Gaussian 物理约束
 
-### 1. Clone HAT-4D and its pinned external source dependencies
+新增 `gaussian_physics.py`、`rigid_gaussian.py` 和 SV4D 初始化适配，将物理计划投影到时序 Gaussian：
 
-```bash
-git clone https://github.com/Lijiaxin0111/HAT-4D-Lifting-Monocular-Video-for-4D-Multi-Object-Interactions-via-Human-Agent-Collaboration.git
-cd HAT-4D-Lifting-Monocular-Video-for-4D-Multi-Object-Interactions-via-Human-Agent-Collaboration
+- 刚体形状与尺度保持；
+- 弹性形变幅度限制；
+- 速度和加速度平滑；
+- 拓扑、接触、残差和相对位置约束。
 
-python annotation_tool/scripts/install_external_dependencies.py \
-  --only sam-3d-objects \
-  --only segment-anything \
-  --only Qwen3-VL \
-  --only openai-clip
+### 6. 4D 验证、记忆与修复
 
-# Verify every checkout against annotation_tool/external_dependencies.json.
-python annotation_tool/scripts/install_external_dependencies.py --check
+新增 Agent4 多视角验证器，对输入对齐、交互语义、物理合理性、形变、时序一致性和 3D 清晰度评分。失败时可诊断为当前 3D 初始化问题或时序记忆问题，并触发：
+
+- 重新运行完整 3D 生成；
+- 使用 memory frame 重建后续片段；
+- 更新容量受限的 memory bank。
+
+### 7. 工程兼容性
+
+- 修复 SAM3D/前端图像方向处理，避免无条件上下翻转；
+- 增加公开 SV4D 权重兼容模式；
+- 增加 PyTorch/CUDA attention 和显存兼容处理；
+- 增加 headless 3D/4D 入口、统一启动脚本和离线 PLY 渲染工具；
+- 增加物理规划、mask 选择、颜色定位和 SV4D 兼容测试。
+
+## 流程
+
+```text
+视频帧
+  -> Agent0 视频理解 / IKG
+  -> Agent1 自动提示点 / SAM mask / SAM3D
+  -> Agent2 相对位姿与碰撞检查
+  -> PhysicsPlanningAgent 分类与物理计划
+  -> L4GM / SV4D 时序生成
+  -> Gaussian 物理投影
+  -> Agent4 多视角验证
+  -> 记忆更新或自动修复
 ```
 
-The installer clones SAM 3D Objects, Segment Anything, Qwen3-VL, and OpenAI
-CLIP at pinned commits. Do not replace these revisions with arbitrary branch
-heads. Qwen3-VL source is optional when an existing OpenAI-compatible Qwen
-endpoint is used. The modified L4GM/MoGA and SV4D2 inference sources are
-already included in this repository.
+## 目录
 
-### 2. Create isolated environments
-
-The ROI/L4GM and SAM3D stacks have different CUDA constraints and should not be
-installed into one environment.
-
-The source-tested ROI stack uses Python 3.11, PyTorch 2.7.0, Torchvision 0.22.0,
-and CUDA 12.8 wheels. SAM3D remains in its upstream CUDA 12.1 environment; do
-not install both stacks into one environment.
-
-```bash
-# Frontend.
-conda create -n hat4d-frontend python=3.11 -y
-conda activate hat4d-frontend
-python -m pip install --upgrade pip
-python -m pip install -r annotation_tool/requirements.txt
-
-# ROI/L4GM backend.
-conda create -n hat4d-roi python=3.11 -y
-conda activate hat4d-roi
-python -m pip install --upgrade pip
-python -m pip install torch==2.7.0 torchvision==0.22.0 \
-  --index-url https://download.pytorch.org/whl/cu128
-python -m pip install -r annotation_tool/requirements.txt
-python -m pip install 'setuptools<81'
-python -m pip install --no-build-isolation -e annotation_tool/thirdparty/CLIP
-python -m pip install -r annotation_tool/requirements_roi.txt
+```text
+annotation_tool/
+  headless_3d_gen.py                 # 无界面 3D 初始化
+  headless_4dgen.py                  # 无界面完整 4D 流程
+  roi_backend.py                     # ROI、L4GM、SV4D 后端
+  viser_frontend.py                  # 交互式前端
+  scripts/                           # 服务启动脚本
+  model4dgen/                        # 4D 生成及兼容修改
+  viewer_plugins/sam3d_gen/          # SAM/SAM3D 与 mask 选择
+  viewer_plugins/vlm_assistor/       # Agents、IKG、物理规划、验证器
 ```
 
-Install SAM3D from its pinned checkout using its upstream CUDA setup:
+## 环境与模型
+
+本项目依赖多个隔离环境和本地模型服务。默认端口如下：
+
+| 服务 | 默认地址 |
+| --- | --- |
+| Qwen3-VL OpenAI-compatible API | `http://127.0.0.1:22003/v1` |
+| ROI/L4GM/SV4D backend | `http://127.0.0.1:8002/select_roi` |
+| SAM3D backend | `http://127.0.0.1:8015` |
+| Viser frontend | `http://127.0.0.1:8897` |
+
+模型权重、第三方模型仓库、数据集和运行结果不提交到 Git。请按本机路径配置环境变量，具体安装细节可参考 `annotation_tool/README_ch.md` 和原项目文档历史。
+
+## 启动
+
+以下命令均在 `annotation_tool/` 目录执行。
 
 ```bash
-cd annotation_tool/viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects
-mamba env create -f environments/default.yml
-mamba activate sam3d-objects
-export PIP_EXTRA_INDEX_URL="https://pypi.ngc.nvidia.com https://download.pytorch.org/whl/cu121"
-python -m pip install -e '.[dev]'
-python -m pip install -e '.[p3d]'
-export PIP_FIND_LINKS="https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.5.1_cu121.html"
-python -m pip install -e '.[inference]'
-./patching/hydra
-python -m pip install -e thirdparty/segment-anything
-python -m pip install viser==1.0.30 imageio scipy
-cd -
+# Terminal 1: Qwen3-VL
+QWEN_MODEL_PATH=/path/to/Qwen3-VL ./scripts/start_qwenvl.sh
+
+# Terminal 2: ROI/L4GM/SV4D
+./scripts/start_roi_backend.sh
+
+# Terminal 3: SAM3D
+./scripts/start_sam3d_backend.sh
+
+# Terminal 4: frontend
+INPUT_IMAGE_DIR=/path/to/frames \
+EVAL_GT_DIR=/path/to/frames \
+WORKSPACE_ROOT=/path/to/results/case_name \
+./scripts/start_frontend.sh
 ```
 
-Use the PyTorch, xFormers, gsplat, and CUDA wheels that match the local driver.
-The commands above follow the pinned SAM3D checkout; consult its
-`doc/setup.md` if its binary packages do not match the machine. A locally
-modified Viser checkout is optional. The public installation uses
-`viser==1.0.30`; custom keyboard shortcuts are disabled gracefully when its
-non-standard `ClientHandle.on_key()` API is unavailable.
-
-### Backend access control
-
-The model APIs bind to loopback by default. Before starting the backends and
-frontend, set one shared token in every terminal. Paths outside this repository
-must be explicitly listed in `HAT4D_ALLOWED_ROOTS` using the platform path
-separator (`:` on Linux):
+公开 `sv4d2.safetensors` 需要显式启用近似兼容模式：
 
 ```bash
-export HAT4D_TOKEN_FILE="${XDG_RUNTIME_DIR:-/tmp}/hat4d-${UID}.token"
-test -s "$HAT4D_TOKEN_FILE" || (umask 077 && openssl rand -hex 32 > "$HAT4D_TOKEN_FILE")
-export HAT4D_API_TOKEN="$(cat "$HAT4D_TOKEN_FILE")"
-export HAT4D_ALLOWED_ROOTS="$PWD:/path/to/input-data:/path/to/results"
+HAT4D_SV4D_PUBLIC_COMPAT=1 ./scripts/start_roi_backend.sh
 ```
 
-Health endpoints remain unauthenticated. All other backend requests use the
-shared token. A backend refuses to bind to a non-loopback address without it.
-The Viser frontend itself has no authentication layer and always refuses a
-non-loopback bind; use an authenticated tunnel or notebook proxy for remote use.
+该模式用于工程兼容，不能等同于未公开的原始 HAT-4D SV4D 变体。
 
-QwenVL is optional for manual annotation. To host it locally, create a separate
-environment and install an SGLang build compatible with the GPU and checkpoint:
+## Headless 运行
 
 ```bash
-conda create -n hat4d-qwen python=3.11 -y
-conda activate hat4d-qwen
-python -m pip install --upgrade pip
-python -m pip install sglang
+cd annotation_tool
+python headless_4dgen.py \
+  --input-image-dir /path/to/frames \
+  --workspace-root /path/to/results/case_name \
+  --backend-url http://127.0.0.1:8002/select_roi \
+  --sam3d-backend-url http://127.0.0.1:8015 \
+  --vlm-local-base-url http://127.0.0.1:22003/v1 \
+  --vlm-local-model /path/to/Qwen3-VL \
+  --start-empty \
+  --camera-target-origin
 ```
 
-### 3. Download and place checkpoints
+已有工作区可用 `--resume-workspace` 恢复；已有 Gaussian 序列可用 `--gs-dir` 指定。
 
-Install the Hugging Face CLI, authenticate only in the local user profile, and
-never commit a token:
+## 输出与检查
 
-```bash
-python -m pip install 'huggingface-hub[cli]<1.0'
-hf auth login
+每次运行会创建独立 workspace。重点查看：
+
+```text
+workspace_xxx/
+  gs_sequence/                        # 每帧 Gaussian PLY
+  images/input/                       # 本次运行使用的输入帧
+  preview/                            # 物理投影及预览中间结果
+  vlm_assistor/
+    *_headless_4dgen_result.json      # 完整流程结果
+    agent4_validator/                 # 验证器多视角渲染
+    checkpoints/                      # Agent 状态与恢复点
 ```
 
-| Checkpoint | Destination | Source |
-| --- | --- | --- |
-| L4GM reconstruction | `annotation_tool/model4dgen/L4GM_MoGA/pretrained/recon.safetensors` | `jiawei011/L4GM` |
-| HAT-4D SV4D2 encoder variant | `annotation_tool/model4dgen/generative-models/checkpoints/sv4d2.0/sv4d2_with_first_stage_encoder_v2.safetensors` | Pending public HAT-4D model release; not currently downloadable from this repository |
-| Segment Anything ViT-H | `annotation_tool/checkpoints/sam/sam_vit_h_4b8939.pth` | Meta Segment Anything |
-| SAM 3D Objects | `annotation_tool/viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects/checkpoints/hf/pipeline.yaml` plus sibling files | gated `facebook/sam-3d-objects` repository |
-| Qwen3-VL | any directory containing `config.json` | Qwen model repository, or an external compatible service |
+在 headless JSON 中，IKG 和分类/物理信息主要位于：
 
-The expected HAT-4D SV4D2 encoder checkpoint is 12,117,981,868 bytes with
-SHA256 `fa46c1d2101ad8cc32e6d3cc4513e1c083f4e2729935467e3d42a57a88a6403a`.
-Verify it after the public model release becomes available:
+- `result.init_3d.agent0.scene_graph`
+- `result.init_3d.agent0.segment_memories`
+- 各对象的 `agent2.object_relation_context`、`final_rule_diagnostics` 和 `final_vlm_eval`
+- 物理规划与投影相关的 `physics_plan`、`physical_attributes` 或 `physics_projection` 字段和对应中间 JSON
+- 各帧的 `validator.evaluation`、`issue_diagnosis` 和 `memory_bank_update`
+
+`ok: false` 不一定表示没有生成结果。例如所有帧已覆盖但某一帧验证失败时，顶层会因 `validator_incomplete` 返回失败；此时应同时检查 `completed_until_frame`、`fully_covered`、`validator_summary` 和失败帧详情。
+
+## 测试
 
 ```bash
-sha256sum annotation_tool/model4dgen/generative-models/checkpoints/sv4d2.0/sv4d2_with_first_stage_encoder_v2.safetensors
+cd annotation_tool
+python -m pytest tests
 ```
 
-Download the publicly hosted weights:
+涉及完整 SAM3D、L4GM、SV4D 或 CUDA 渲染的测试仍要求对应模型、GPU 和服务已经就绪。
+
+## 提交范围
+
+建议提交：
+
+- 所有新增和修改的 Python、Shell、测试与文档；
+- 根目录的 `.gitignore`、`README.md` 和原项目 `LICENSE`；
+- 为复现所必需且许可证允许提交的小型配置文件。
+
+不要提交：
+
+- `asset/demo_case_3/` 等本地或受限数据；
+- checkpoint、模型权重、模型缓存和指向本机 `/data/...` 的软链接；
+- `workspace_*`、`results/`、PLY、验证截图和临时日志；
+- API key、token、私有配置和 Conda/venv 环境。
+
+提交前建议检查：
 
 ```bash
-mkdir -p annotation_tool/model4dgen/L4GM_MoGA/pretrained
-hf download jiawei011/L4GM recon.safetensors \
-  --local-dir annotation_tool/model4dgen/L4GM_MoGA/pretrained
-
-mkdir -p annotation_tool/checkpoints/sam
-curl --fail --location \
-  https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth \
-  --output annotation_tool/checkpoints/sam/sam_vit_h_4b8939.pth
-
-SAM3D_ROOT=annotation_tool/viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects
-hf download facebook/sam-3d-objects \
-  --repo-type model \
-  --local-dir "$SAM3D_ROOT/checkpoints/hf-download" \
-  --max-workers 1
-mv "$SAM3D_ROOT/checkpoints/hf-download/checkpoints" \
-  "$SAM3D_ROOT/checkpoints/hf"
-rm -rf "$SAM3D_ROOT/checkpoints/hf-download"
-```
-
-The HAT-4D SV4D2 encoder checkpoint is not the upstream
-`stabilityai/sv4d2.0` `sv4d2.safetensors` file. Obtain the encoder-variant
-checkpoint from the pending HAT-4D model release and keep its exact filename; renaming
-the upstream checkpoint does not make it compatible. Review every model license
-before downloading or redistributing weights.
-
-## Test The Annotation Tool
-
-The complete workflow uses one GPU for ROI/L4GM and one GPU for SAM3D. QwenVL
-may be hosted elsewhere. Run each block from the repository root in a separate
-terminal.
-
-```bash
-# Terminal 1: ROI/L4GM on GPU 0.
-conda activate hat4d-roi
-export CUDA_VISIBLE_DEVICES=0
-export TORCH_EXTENSIONS_DIR="$HOME/.cache/hat4d-roi"
-annotation_tool/scripts/start_roi_backend.sh
-```
-
-```bash
-# Terminal 2: SAM3D on GPU 1.
-conda activate sam3d-objects
-export CUDA_VISIBLE_DEVICES=1
-export TORCH_EXTENSIONS_DIR="$HOME/.cache/hat4d-sam3d"
-annotation_tool/scripts/start_sam3d_backend.sh
-```
-
-Confirm both backends before starting the UI:
-
-```bash
-curl --fail http://127.0.0.1:8002/health
-curl --fail http://127.0.0.1:8015/health
-```
-
-For a remote OpenAI-compatible Qwen service, set `BASE_URL` only in the shell.
-It must be the server root before `/v1`; do not put a private proxy URL in this
-README or in a tracked `.env` file.
-
-```bash
-# Terminal 3: frontend using the included demo case.
-conda activate hat4d-frontend
-
-export BASE_URL="https://your-qwen-endpoint.example/proxy/8000"
-export INPUT_IMAGE_DIR="$PWD/asset/demo_case_1/input"
-export EVAL_GT_DIR="$PWD/asset/demo_case_1/eval_gt"
-export WORKSPACE_ROOT="$PWD/results/demo_case_1"
-export VLM_LOCAL_BASE_URL="${BASE_URL%/}/v1"
-export VLM_LOCAL_MODEL="Qwen3vl"
-export VLM_LOCAL_API_KEY="EMPTY"
-
-export NO_PROXY="127.0.0.1,localhost"
-export no_proxy="$NO_PROXY"
-
-mkdir -p "$WORKSPACE_ROOT"
-curl --fail "$BASE_URL/health"
-curl --fail "$VLM_LOCAL_BASE_URL/models"
-annotation_tool/scripts/start_frontend.sh
-```
-
-Open `http://127.0.0.1:8897`. When using the source-tested environments from
-the original development machine, `4dgsEditor` can replace `hat4d-roi`, and
-`4dgsEditor_sam3d_v2` can replace both `sam3d-objects` and `hat4d-frontend`.
-
-### Publication and privacy checks
-
-All services bind to `127.0.0.1` by default. Do not expose model or annotation
-ports publicly without authentication and transport security. Private input
-frames and evaluation views, workspaces, model weights, tokens, private endpoint
-URLs, and machine-specific absolute paths must remain untracked. The only tracked
-input/evaluation frames are the reviewed demo subsets documented in
-[`asset/README.md`](asset/README.md).
-
-Before publishing a change, run:
-
-```bash
-python -m compileall -q \
-  -x '(^|/)(thirdparty|tmp|checkpoints|\.cache)(/|$)' \
-  annotation_tool
-pytest -q annotation_tool/tests
-python annotation_tool/scripts/install_external_dependencies.py --check
-python annotation_tool/scripts/check_publication.py \
-  README.md docs/ui_README.md docs/ui_README_ch.md annotation_tool asset
 git status --short
+git diff --check
+git ls-files | rg 'checkpoint|safetensors|workspace_|/data/'
 ```
 
-Review `git status` manually before every commit. The automated scan catches
-common paths, credentials, generated artifacts, symlinks, and oversized files,
-but cannot determine whether an image contains a face, screen, badge, location,
-or other personally identifying content.
+## 已知限制
 
+- 小型 VLM 可能漏检细微运动或给出互相矛盾的关系；
+- 细杆、齿状结构和严重遮挡对象的 mask 仍可能不稳定；
+- 物理约束只能限制已生成运动，不能恢复模型完全没有生成的动作；
+- 当前碰撞主要基于 AABB 和 VLM 视觉判断，不是完整物理仿真；
+- 多视角清晰度和透明边缘仍受 SAM3D/L4GM 初始几何质量影响。
 
-## ToDo List ✅
+## 上游与许可证
 
-- [x] Open-source MVOIK-4D .
-- [x] Open-source HAT-4D annotation toolkit.
+本项目来源于 HAT-4D：*Lifting Monocular Video for 4D Multi-Object Interactions via Human-Agent Collaboration*。请同时遵守本仓库 `LICENSE`、上游 HAT-4D 许可证，以及 SAM、SAM3D、L4GM、SV4D、Qwen 等第三方组件各自的许可证。
 
-## Citation 📝
-
-If you find this project useful for your research, please cite:
-
-```bibtex
-@inproceedings{Li2026hat4d,
-  title     = {HAT-4D: Lifting Monocular Video for 4D Multi-Object Interactions via Human-Agent Collaboration},
-  author    = {Li, Jiaxin and Wu, Yuxiang and Zhang, Zhenkai and Shi, Xinrui and
-               Wang, Haoyuan and Zhao, Yichen and Su, Linxiang and Yu, Chenyang and
-               Zhang, Mingyu and Ding, Yifan and Wen, Boran and Zhang, Li and
-               Liu, Ruiyang and Li, Yong-Lu},
-  booktitle = {Computer Vision -- ECCV 2026},
-  year      = {2026},
-  note      = {Accepted, to appear}
-}
-```
-
-## References 🙏
-
-We thank the following projects and systems for making this work possible:
-
-- [SAM 3D Objects](https://github.com/facebookresearch/sam-3d-objects)
-- [Qwen3-VL](https://github.com/QwenLM/Qwen3-VL)
-- [SV4D](https://github.com/Stability-AI/generative-models)
-- [viser](https://github.com/nerfstudio-project/viser)
-
-## License 📄
-
-The project source code is released under the [Apache License 2.0](LICENSE).
-The demo data under `asset/demo_case_1` and `asset/demo_case_2` is distributed
-under [CC BY-NC 4.0](asset/README.md). Bundled third-party components retain
-their respective licenses; see
-[`annotation_tool/THIRD_PARTY_NOTICES.md`](annotation_tool/THIRD_PARTY_NOTICES.md).
-
-Unless required by applicable law or agreed to in writing, software distributed under this license is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the [LICENSE](LICENSE) file for the full license text.
+发表或分发衍生结果时，应保留上游归属并引用原 HAT-4D 工作；本仓库新增部分应作为独立衍生实现说明，不应表述为原作者合作或官方版本。

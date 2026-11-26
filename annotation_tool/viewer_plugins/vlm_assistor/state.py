@@ -32,6 +32,7 @@ class VLMAssistorState:
         self.last_pose_adjust: dict[str, Any] = {}
         self.last_4d_validation: dict[str, Any] = {}
         self.last_4d_memory_result: dict[str, Any] = {}
+        self.last_physics_plan: dict[str, Any] = {}
 
         self.logs: list[AgentLogEntry] = []
         self.max_logs: int = 40

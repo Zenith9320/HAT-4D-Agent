@@ -1,6 +1,7 @@
 # Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 # pytorch_diffusion + derived encoder decoder
 import logging
+import os
 import math
 from typing import Any, Callable, Optional
 
@@ -246,9 +247,14 @@ class MemoryEfficientAttnBlock(nn.Module):
             .contiguous(),
             (q, k, v),
         )
-        out = xformers.ops.memory_efficient_attention(
-            q, k, v, attn_bias=None, op=self.attention_op
-        )
+        if os.environ.get("HAT4D_DISABLE_XFORMERS", "0") == "1":
+            out = torch.nn.functional.scaled_dot_product_attention(
+                q.unsqueeze(1), k.unsqueeze(1), v.unsqueeze(1)
+            ).squeeze(1)
+        else:
+            out = xformers.ops.memory_efficient_attention(
+                q, k, v, attn_bias=None, op=self.attention_op
+            )
 
         out = (
             out.unsqueeze(0)

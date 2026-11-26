@@ -23,6 +23,11 @@ for _p in (_THIS_DIR, _PARENT):
         sys.path.insert(0, _sp)
 
 try:
+    from ..mask_selection import select_prompt_consistent_mask
+except ImportError:  # script mode fallback
+    from mask_selection import select_prompt_consistent_mask
+
+try:
     from .helpers import (
         BUILD_ID,
         _repo_root,
@@ -243,7 +248,7 @@ class Sam3DBackend:
                 point_labels=labs,
                 multimask_output=True,
             )
-            best = int(np.argmax(scores))
+            best = select_prompt_consistent_mask(masks, scores, pts, labs)
             mask = masks[best].astype(bool)
             logits_best = logits[best]
         else:

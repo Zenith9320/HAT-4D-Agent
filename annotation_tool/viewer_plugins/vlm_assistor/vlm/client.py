@@ -253,6 +253,83 @@ class VLMBackendClient:
             require_api_key=True,
         )
 
+    def infer_physical_properties(
+        self,
+        *,
+        object_name: str,
+        scene_graph: dict[str, Any],
+        backend_mode: str | None = None,
+        timeout: float = 90.0,
+    ) -> dict[str, Any]:
+        """Infer continuous physical attributes without category-to-mode rules."""
+        mode = str(backend_mode or self._agent0_backend_mode())
+        schema = {
+            "rigidity": "0..1; resistance to shape change",
+            "elasticity": "0..1; reversible deformation tendency",
+            "articulatedness": "0..1; motion through persistent joints",
+            "sheet_likeness": "0..1; thin surface dominated structure",
+            "topology_stability": "0..1; likelihood topology stays fixed",
+            "deformation_observed": "0..1; visible non-rigid deformation in the video",
+            "confidence": "0..1",
+            "evidence": "short explanation based on observations and common physical knowledge",
+        }
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a physical property estimator for 4D reconstruction. Infer continuous "
+                    "properties, not an object-class-specific implementation. Return one JSON object "
+                    "only. Do not choose a solver or motion representation. Use conservative scores "
+                    "when evidence is weak."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Target object: {object_name}\n"
+                    f"Temporal scene graph: {json.dumps(scene_graph, ensure_ascii=False)}\n"
+                    f"Required fields: {json.dumps(schema, ensure_ascii=False)}"
+                ),
+            },
+        ]
+        if mode == "official_api":
+            base_url = self._openai_base_url()
+            api_key = self._openai_api_key()
+            payload = {
+                "model": self._openai_model(),
+                "temperature": 0.0,
+                "response_format": {"type": "json_object"},
+                "messages": messages,
+            }
+            response = self._post_chat_completions(
+                payload, base_url=base_url, api_key=api_key, timeout=timeout, require_api_key=True
+            )
+            provider = "official_api"
+        else:
+            base_url = self._local_vlm_base_url()
+            api_key = self._local_vlm_api_key()
+            if not base_url:
+                return {"ok": False, "reason": "local_vlm_base_url_missing"}
+            payload = {
+                "model": self._local_vlm_model(),
+                "temperature": 0.0,
+                "messages": self._convert_system_to_user_prefix(messages),
+            }
+            response = self._post_chat_completions(
+                payload, base_url=base_url, api_key=api_key, timeout=timeout, require_api_key=False
+            )
+            provider = "local_openai_compatible"
+        if not isinstance(response, dict):
+            return {"ok": False, "reason": f"{provider}_http_failed"}
+        try:
+            text = self._extract_message_text(response["choices"][0]["message"]["content"])
+            parsed = self._try_parse_json_obj(text)
+            if not isinstance(parsed, dict):
+                raise ValueError("json_object_required")
+            return {"ok": True, "provider": provider, "physical_properties": parsed}
+        except Exception as exc:
+            return {"ok": False, "reason": f"invalid_physics_json:{type(exc).__name__}:{exc}"}
+
     @staticmethod
     def _normalize_click_points(
         raw: Any,
@@ -1806,12 +1883,19 @@ class VLMBackendClient:
             violates_instance_policy = True
 
         inside_non_target_objects: list[str] = []
+        inside_target_objects: list[str] = []
         outside_target_objects: list[str] = []
         seen_inside_non_target: set[str] = set()
+        seen_inside_target: set[str] = set()
         seen_outside_target: set[str] = set()
         target_aliases = set(self._expand_name_aliases([target_name_norm_en]))
         for obj_name in inside_mask_objects:
             obj_aliases = self._expand_name_aliases([str(obj_name)])
+            if any(alias in target_aliases for alias in obj_aliases):
+                k = str(self.to_english_object_name(str(obj_name))).strip().lower()
+                if k and k not in seen_inside_target:
+                    seen_inside_target.add(k)
+                    inside_target_objects.append(str(obj_name))
             if any(alias in non_target_aliases for alias in obj_aliases):
                 k = str(self.to_english_object_name(str(obj_name))).strip().lower()
                 if k and k not in seen_inside_non_target:
@@ -1901,12 +1985,50 @@ class VLMBackendClient:
         if consistency_violations:
             reason_codes.append("schema_consistency_violation")
 
+        # The evaluator sometimes returns target_fully_contained=false while its
+        # own structured inventory says the target is inside, every non-target is
+        # outside, and no target part is missing. Prefer that internally
+        # consistent inventory over the contradictory boolean.
+        target_containment_overridden_by_inventory = False
+        known_non_targets_all_outside = True
+        outside_aliases: set[str] = set()
+        for obj_name in outside_mask_objects:
+            outside_aliases.update(self._expand_name_aliases([str(obj_name)]))
+        for non_target_name in non_targets_norm_en:
+            aliases = set(self._expand_name_aliases([str(non_target_name)]))
+            if aliases and not any(alias in outside_aliases for alias in aliases):
+                known_non_targets_all_outside = False
+                break
+        inventory_proves_complete = bool(
+            inside_target_objects
+            and known_non_targets_all_outside
+            and (not missing)
+            and (not extra)
+            and (not inside_non_target_objects)
+            and (not outside_target_objects)
+            and (not uncertain)
+            and (not violates_instance_policy)
+        )
+        if (not target_fully_contained) and inventory_proves_complete:
+            target_fully_contained = True
+            target_containment_overridden_by_inventory = True
+            reason_codes.append("target_fully_contained_overridden_by_inventory")
+
         # Final mask verdict is always computed with hard boolean rules.
         target_complete_in_mask = bool(target_fully_contained) and (len(missing) == 0) and (len(outside_target_objects) == 0)
         non_target_outside_mask = (len(extra) == 0) and (len(inside_non_target_objects) == 0)
         accurate = bool(target_complete_in_mask and non_target_outside_mask and (not uncertain) and (not violates_instance_policy))
         if bool(model_accurate) != bool(accurate):
             reason_codes.append("model_accurate_overridden_by_contract")
+            summary = (
+                "结果：通过。目标完整位于mask内，所有非目标均位于mask外。"
+                if accurate and language == "zh"
+                else "Result: pass. The target is complete in the mask and all non-targets are outside."
+                if accurate
+                else "结果：失败。最终一致性检查未通过。"
+                if language == "zh"
+                else "Result: fail. The final consistency check did not pass."
+            )
         if not target_complete_in_mask:
             reason_codes.append("target_not_complete_in_mask")
         if not non_target_outside_mask:
@@ -1973,11 +2095,16 @@ class VLMBackendClient:
                 "non_target_in_missing_parts": non_target_in_missing,
                 "missing_parts_detail_issues": missing_part_detail_issues,
                 "inside_mask_contains_non_targets": inside_non_target_objects,
+                "inside_mask_contains_target": inside_target_objects,
                 "outside_mask_contains_target": outside_target_objects,
             },
             "occlusion_policy": {
                 "target_fully_contained_overridden": bool(target_fully_contained_overridden_by_occlusion),
                 "missing_reclassified_no_outside_target": bool(missing_reclassified_no_outside_target),
+            },
+            "inventory_policy": {
+                "target_fully_contained_overridden": bool(target_containment_overridden_by_inventory),
+                "known_non_targets_all_outside": bool(known_non_targets_all_outside),
             },
             "consistency_violations": consistency_violations,
             "reason_codes": reason_codes,
@@ -5582,11 +5709,11 @@ class VLMBackendClient:
         env_overlap = os.getenv("VLM_AGENT0_CHUNK_OVERLAP")
         chunk_size = int(
             getattr(self.app, "vlm_agent0_chunk_size", None)
-            or (int(env_chunk) if env_chunk else 45)
+            or (int(env_chunk) if env_chunk else 12)
         )
         overlap = int(
             getattr(self.app, "vlm_agent0_chunk_overlap", None)
-            or (int(env_overlap) if env_overlap else 8)
+            or (int(env_overlap) if env_overlap else 3)
         )
         chunk_size = max(1, min(49, int(chunk_size)))
         overlap = max(0, min(int(overlap), chunk_size - 1))
@@ -5702,6 +5829,9 @@ class VLMBackendClient:
                 "2) distance_hint 只能取 {near_zero, near, mid, far, unknown}。\n"
                 "3) 重点描述在该片段内开始/结束/变化的事件。\n"
                 "4) 若可能，物体命名要与历史记忆保持一致。\n\n"
+                "4.0) 必须依次比较片段首帧、中间帧、末帧中每个物体的轮廓、位置、接触和形变。"
+                "只要任一物体发生可见位移、按压形变、接触开始/结束或遮挡变化，就不得将整个片段描述为静止，"
+                "必须拆分阶段并记录对应事件。相机不动不代表物体不动。\n\n"
                 "4.1) 同类物体优先按外观细节区分并命名（颜色、纹理、形状、大小、破损/污渍/标记等）。\n"
                 "4.2) objects 默认只包含真实物体实例名，不用纯方位/区域短语当物体名。\n"
                 "4.3) 仅当外观确实无法区分时，允许使用“左侧的杯子/右侧的杯子”等方位限定名，并保持全片一致。\n"
@@ -5741,6 +5871,9 @@ class VLMBackendClient:
                 "2) distance_hint in {near_zero, near, mid, far, unknown}.\n"
                 "3) Focus on events that start/end/change in this segment.\n"
                 "4) Keep object naming consistent with previous memory if possible.\n\n"
+                "4.0) Explicitly compare each object's contour, position, contact, and deformation in the first, middle, and last frame. "
+                "If any object visibly translates, deforms under pressure, starts/ends contact, or changes occlusion, do not label the whole segment static; "
+                "split phases and record the event. A static camera does not imply static objects.\n\n"
                 "4.1) For same-category objects, first distinguish and name by visible appearance details "
                 "(color, texture, shape, size, damage/stain/markings, etc.).\n"
                 "4.2) `objects` should primarily contain real object instance names, not pure spatial/region phrases.\n"
@@ -5854,6 +5987,8 @@ class VLMBackendClient:
                 "1) 去重物体名称。\n"
                 "2) 按时间一致性解决重叠冲突。\n"
                 "3) 仅保留符号化空间/交互约束（不输出数值位姿）。\n\n"
+                "3.0) 不得因多数片段外观相似而抹掉短暂动作。若任一片段报告位移、按压形变、接触变化或遮挡变化，"
+                "全局结果必须保留相应阶段和事件；只有所有片段都明确无变化时，才能输出全程静止。\n\n"
                 "3.1) 合并时优先保留按外观细节区分的实例名（颜色、纹理、形状、大小、标记等）。\n"
                 "3.2) 若同类物体外观确实无法区分，可保留“左侧的杯子/右侧的杯子”等方位限定名，但必须时序一致、语义稳定。\n"
                 "3.3) 纯方位区域伪物体（如“杯子右侧区域”）应删除；方位语义保留在 relative_position_timeline 中。\n\n"
@@ -5889,6 +6024,8 @@ class VLMBackendClient:
                 "1) Deduplicate object names.\n"
                 "2) Resolve overlap conflicts by temporal consistency.\n"
                 "3) Keep symbolic spatial/interaction constraints only (no numeric poses).\n\n"
+                "3.0) Do not erase a brief action because most segments look similar. If any segment reports translation, pressure deformation, "
+                "contact change, or occlusion change, preserve the corresponding phase and event globally. Mark the whole video static only when every segment explicitly reports no change.\n\n"
                 "3.1) During merge, prefer instance names distinguished by appearance details "
                 "(color, texture, shape, size, markings, etc.).\n"
                 "3.2) If same-category objects are truly visually indistinguishable, spatially-qualified names "

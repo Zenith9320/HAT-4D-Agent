@@ -12,6 +12,7 @@ from .agents import (
     ClickAgent,
     FourDMemoryJudgeAgent,
     FourDValidatorAgent,
+    PhysicsPlanningAgent,
     Gen3DValidatorAgent,
     MemoryFrameSelector,
     PoseAdjusterAgent,
@@ -36,6 +37,7 @@ class VLMAssistorOps:
         self.pose_adjuster = PoseAdjusterAgent(ctx, state, self.bridge, self.vlm_client)
         self.pose_adjuster_v2 = PoseAdjusterAgentV2(ctx, state, self.bridge, self.vlm_client)
         self.fourd_validator = FourDValidatorAgent(ctx, state, self.bridge, self.vlm_client)
+        self.physics_planner = PhysicsPlanningAgent(ctx, state, self.bridge, self.vlm_client)
         self.fourd_memory_judge = FourDMemoryJudgeAgent(ctx, state, self.bridge, self.vlm_client)
         self.memory_selector = MemoryFrameSelector(ctx, state, self.bridge, self.vlm_client)
 
@@ -45,6 +47,12 @@ class VLMAssistorOps:
                 self.state.status_handle.value = str(text)
             except Exception:
                 pass
+
+    def plan_physics_for_segment_sync(self, *, start_frame: int, num_frames: int) -> dict[str, Any]:
+        out = self.physics_planner.run(start_frame=int(start_frame), num_frames=int(num_frames))
+        self._dump_artifact("agent5_physics_plan", out)
+        self._set_logs_text()
+        return out
 
     def _set_object_description(self, text: str) -> None:
         s = str(text or "")
@@ -1092,6 +1100,12 @@ class VLMAssistorOps:
             "num_frames": int(max(1, int(num_frames))),
             "start_frame": int(max(0, int(start_frame))),
         }
+        planned = self.plan_physics_for_segment_sync(
+            start_frame=int(start_frame), num_frames=int(num_frames)
+        )
+        physics_plan = dict(planned.get("plan", {}) or {})
+        if physics_plan:
+            payload["physics_plan"] = physics_plan
         self._dbg_full4d("generate_segment_request", payload)
         req = self._safe_post_json(
             post_fn,
@@ -1154,6 +1168,13 @@ class VLMAssistorOps:
             "memory_frame_indices": mem,
             "debug_ref_video": bool(getattr(app, "memory_debug_ref_video", False)),
         }
+        planned = self.plan_physics_for_segment_sync(
+            start_frame=int(start_frame),
+            num_frames=int(max(1, total_clip_frames - len(mem))),
+        )
+        physics_plan = dict(planned.get("plan", {}) or {})
+        if physics_plan:
+            payload["physics_plan"] = physics_plan
         self._dbg_full4d("generate_segment_with_memory_request", payload)
         req = self._safe_post_json(
             post_fn,
@@ -1591,6 +1612,8 @@ class VLMAssistorOps:
                 cursor = max(0, min(int(cp.get("cursor", 0)), max(0, total_frames - 1)))
                 seg_id = max(0, int(cp.get("seg_id", 0)))
                 init_3d_done = bool(cp.get("init_3d_done", bool(result.get("init_3d"))))
+                if init_3d_done and not bool(result.get("init_3d", {}).get("ok", False)):
+                    init_3d_done = False
                 sam3d_finalize_done = bool(cp.get("sam3d_finalize_done", bool(result.get("sam3d_finalize"))))
                 maybe_seg = cp.get("in_progress_segment", {})
                 in_progress_segment = dict(maybe_seg) if isinstance(maybe_seg, dict) and maybe_seg else None
@@ -1618,9 +1641,18 @@ class VLMAssistorOps:
                 self._set_current_frame_for_client(client, 0, mirror_client=ui_client)
                 init_3d = self._run_full_pipeline_task(client, object_text=object_text, relation_hint=relation_hint)
                 result["init_3d"] = init_3d
-                init_3d_done = True
-                if not bool(init_3d.get("ok", False)):
-                    self._dbg_full4d("init_3d_partial_or_failed", {"init_3d_ok": bool(init_3d.get("ok", False))})
+                init_3d_done = bool(init_3d.get("ok", False))
+                if not init_3d_done:
+                    detail = {
+                        "reason": "all_detected_objects_must_initialize",
+                        "target_count": int(init_3d.get("target_count", 0) or 0),
+                        "agent1_ok_count": int(init_3d.get("agent1_ok_count", 0) or 0),
+                        "agent2_ok_count": int(init_3d.get("agent2_ok_count", 0) or 0),
+                    }
+                    result["errors"].append({"stage": "init_3d_incomplete", "detail": detail})
+                    self._dbg_full4d("abort_init_3d_incomplete", detail)
+                    _save_checkpoint(status="failed", stage="init_3d_incomplete")
+                    return result
                 _save_checkpoint(status="running", stage="after_init_3d")
 
             if not sam3d_finalize_done:
@@ -1842,7 +1874,32 @@ class VLMAssistorOps:
             result["completed_until_frame"] = int(max(0, cursor))
             result["target_last_frame"] = int(max(0, total_frames - 1))
             result["fully_covered"] = bool(cursor >= total_frames - 1)
-            result["ok"] = bool(len(result["segments"]) > 0 and len(result["errors"]) == 0 and result["fully_covered"])
+            validator_checks = [
+                bool(frame.get("validator_ok", False) or frame.get("revalidate_ok", False))
+                for segment in result["segments"]
+                for frame in list(segment.get("frames", []) or [])
+            ]
+            validator_complete = bool(not validator_enabled or (validator_checks and all(validator_checks)))
+            result["validator_summary"] = {
+                "enabled": bool(validator_enabled),
+                "checked_frames": int(len(validator_checks)),
+                "passed_frames": int(sum(validator_checks)),
+                "complete": bool(validator_complete),
+            }
+            if not validator_complete:
+                result["errors"].append(
+                    {
+                        "stage": "validator_incomplete",
+                        "detail": dict(result["validator_summary"]),
+                    }
+                )
+            result["ok"] = bool(
+                bool(result.get("init_3d", {}).get("ok", False))
+                and len(result["segments"]) > 0
+                and len(result["errors"]) == 0
+                and result["fully_covered"]
+                and validator_complete
+            )
             if bool(result.get("ok", False)):
                 _save_checkpoint(status="done", stage="completed")
                 self._clear_full4d_checkpoint()

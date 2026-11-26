@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import clip
 import numpy as np
@@ -6,7 +7,7 @@ import torch
 import torchvision.transforms as T
 from PIL import Image
 
-RESOURCES_ROOT = "scripts/util/detection/"
+RESOURCES_ROOT = Path(__file__).resolve().parent
 
 
 def predict_proba(X, weights, biases):
@@ -46,15 +47,11 @@ class DeepFloydDataFiltering(object):
         self.clip_model, _ = clip.load("ViT-L/14", device=device) 
         self.clip_model.eval()
         
-        RESOURCES_ROOT = "scripts/util/detection/"
-        if not os.path.exists(os.path.join(RESOURCES_ROOT, "w_head_v1.npz")):
-            RESOURCES_ROOT = os.path.join("model4dgen/generative-models", RESOURCES_ROOT )# FOR 4Dgs Editor
-
         self.cpu_w_weights, self.cpu_w_biases = load_model_weights(
-            os.path.join(RESOURCES_ROOT, "w_head_v1.npz")
+            RESOURCES_ROOT / "w_head_v1.npz"
         )
         self.cpu_p_weights, self.cpu_p_biases = load_model_weights(
-            os.path.join(RESOURCES_ROOT, "p_head_v1.npz")
+            RESOURCES_ROOT / "p_head_v1.npz"
         )
         self.w_threshold, self.p_threshold = 0.5, 0.5
 

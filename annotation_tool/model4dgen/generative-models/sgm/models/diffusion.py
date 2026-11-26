@@ -1,4 +1,5 @@
 import math
+import os
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -94,6 +95,8 @@ class DiffusionEngine(pl.LightningModule):
             raise NotImplementedError
 
         missing, unexpected = self.load_state_dict(sd, strict=False)
+        if os.environ.get("HAT4D_SV4D_PUBLIC_COMPAT", "0") == "1":
+            missing = self._initialize_hat4d_public_compat(missing)
         print(
             f"Restored from {path} with {len(missing)} missing and {len(unexpected)} unexpected keys"
         )
@@ -101,6 +104,65 @@ class DiffusionEngine(pl.LightningModule):
             print(f"Missing Keys: {missing}")
         if len(unexpected) > 0:
             print(f"Unexpected Keys: {unexpected}")
+
+    def _initialize_hat4d_public_compat(self, missing):
+        """Initialize HAT-4D-only encoders from the public SV4D2 VAE encoder.
+
+        This is an approximation for evaluating the public code path. It is not
+        equivalent to the unpublished HAT-4D encoder-variant checkpoint.
+        """
+        from ..modules.encoders.modules import VideoPredictionEmbedderWithEncoder
+
+        video_embedders = [
+            embedder
+            for embedder in self.conditioner.embedders
+            if isinstance(embedder, VideoPredictionEmbedderWithEncoder)
+        ]
+        if len(video_embedders) < 3:
+            raise RuntimeError(
+                "HAT4D_SV4D_PUBLIC_COMPAT requires cond_frames, cond_view, and "
+                "cond_motion video encoders"
+            )
+
+        source = video_embedders[0].encoder
+        source_state = source.state_dict()
+        copied = []
+        for name, target in (
+            ("cond_view", video_embedders[1].encoder),
+            ("cond_motion", video_embedders[2].encoder),
+            ("first_stage", self.first_stage_model),
+        ):
+            target_state = target.state_dict()
+            compatible = {
+                key: value
+                for key, value in source_state.items()
+                if key in target_state and value.shape == target_state[key].shape
+            }
+            target.load_state_dict(compatible, strict=False)
+            copied.append(f"{name}={len(compatible)} tensors")
+            if not compatible:
+                raise RuntimeError(f"No compatible public VAE weights found for {name}")
+
+        allowed_prefixes = (
+            "conditioner.embedders.4.encoder.",
+            "conditioner.embedders.5.encoder.",
+            "first_stage_model.encoder.",
+            "first_stage_model.quant_conv.",
+        )
+        unresolved = [key for key in missing if not key.startswith(allowed_prefixes)]
+        if unresolved:
+            preview = "\n  ".join(unresolved[:20])
+            raise RuntimeError(
+                "Public SV4D2 checkpoint is missing non-encoder HAT-4D weights; "
+                f"refusing approximate inference:\n  {preview}"
+            )
+
+        print(
+            "[HAT-4D] PUBLIC SV4D2 COMPATIBILITY MODE: "
+            + ", ".join(copied)
+            + ". Results are approximate and not paper-equivalent."
+        )
+        return []
 
     def _init_first_stage(self, config):
         model = instantiate_from_config(config).eval()
@@ -148,8 +210,6 @@ class DiffusionEngine(pl.LightningModule):
         z = torch.cat(all_out, dim=0)
         z = self.scale_factor * z
         return z
-    
-    
 
     def forward(self, x, batch):
         loss = self.loss_fn(self.model, self.denoiser, self.conditioner, x, batch)
@@ -341,6 +401,3 @@ class DiffusionEngine(pl.LightningModule):
             samples = self.decode_first_stage(samples)
             log["samples"] = samples
         return log
-
-    
-    

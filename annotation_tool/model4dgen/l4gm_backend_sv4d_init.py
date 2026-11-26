@@ -37,6 +37,11 @@ from .L4GM_MoGA.core_free_fn.models import LGM
 from .L4GM_MoGA.mvdream.pipeline_mvdream import MVDreamPipeline
 from .L4GM_MoGA.core.options_conf import Options
 from .runtime_utils import seed_everything
+from .rigid_gaussian import (
+    apply_rigid_transform_to_gaussians,
+    estimate_weighted_rigid_transform,
+)
+from .gaussian_physics import project_gaussian_sequence
 from .L4GM_MoGA.core.gs import GaussianRenderer
 from .L4GM_MoGA.utils.gpu_utils import print_gpu_memory
 
@@ -187,6 +192,10 @@ class L4GMGenerator:
         This will compile CUDA extensions and initialize kernels.
         """
 
+        if os.environ.get("HAT4D_SKIP_GSPLAT_WARMUP", "0") == "1":
+            print("[L4GMGenerator] Skipping gsplat renderer warmup (HAT4D_SKIP_GSPLAT_WARMUP=1)")
+            return
+
         print("[L4GMGenerator] Warming up gsplat renderer...")
 
         device = self.device
@@ -249,13 +258,29 @@ class L4GMGenerator:
         return model, rays_embeddings
 
     def _load_mvdream(self) -> MVDreamPipeline:
-        print("self.cache:", str(self.root / ".cache"))
+        model_source = os.getenv("MVDREAM_MODEL_PATH", "ashawkey/imagedream-ipmv-diffusers").strip()
+        cache_dir = Path(os.getenv("MVDREAM_CACHE_DIR", str(self.root / ".cache"))).expanduser()
+        local_only = os.getenv("MVDREAM_LOCAL_FILES_ONLY", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
+        if Path(model_source).is_absolute() and not Path(model_source).exists():
+            raise FileNotFoundError(
+                f"MVDream model directory not found: {model_source}. "
+                "Download ashawkey/imagedream-ipmv-diffusers and set MVDREAM_MODEL_PATH."
+            )
+        print(
+            f"[L4GMGenerator] Loading MVDream from {model_source} "
+            f"(cache={cache_dir}, local_files_only={local_only})"
+        )
         pipe = MVDreamPipeline.from_pretrained(
-            "ashawkey/imagedream-ipmv-diffusers",
+            model_source,
             torch_dtype=torch.float16,
             trust_remote_code=True,
-            cache_dir=str(self.root / ".cache"),
-            local_files_only=True,
+            cache_dir=str(cache_dir),
+            local_files_only=local_only,
         )
         return pipe.to(self.device)
 
@@ -709,6 +734,7 @@ class L4GMGenerator:
         start_frame_idx: int,
         session_root: Path,
         opt: Options,
+        physics_plan: Optional[Dict] = None,
     ) -> List[Path]:
         num_clip_frames = ref_video.shape[0]
         target_frame_indices = [start_frame_idx + t for t in range(num_clip_frames)]
@@ -717,6 +743,7 @@ class L4GMGenerator:
             target_frame_indices=target_frame_indices,
             session_root=session_root,
             opt=opt,
+            physics_plan=physics_plan,
         )
 
     def _forward_and_save_segment_to_indices(
@@ -725,6 +752,7 @@ class L4GMGenerator:
         target_frame_indices: List[int],
         session_root: Path,
         opt: Options,
+        physics_plan: Optional[Dict] = None,
     ) -> List[Path]:
         num_clip_frames = ref_video.shape[0]
         if len(target_frame_indices) != num_clip_frames:
@@ -733,17 +761,80 @@ class L4GMGenerator:
                 f"{len(target_frame_indices)} vs {num_clip_frames}"
             )
 
+        representation = str((physics_plan or {}).get("representation", "")).strip().lower()
+        rigid_mode = os.environ.get("HAT4D_RIGID_SEGMENTS", "0") == "1"
+        canonical_path = session_root / "gs_sequence" / f"{int(target_frame_indices[0]):06d}.ply"
+        canonical_gaussians = None
+        if rigid_mode:
+            canonical_gaussians = self._load_gaussians_from_ply(canonical_path)
+
         gaussians_all_frame = self._forward_gaussians_sequence(ref_video, opt, num_clip_frames)
         B = 1
         gaussians_all_frame = gaussians_all_frame.reshape(
             B, gaussians_all_frame.shape[0] // opt.batch_size, *gaussians_all_frame.shape[1:]
         )
 
+        projection_metadata = None
+        if physics_plan and not rigid_mode:
+            projected, projection_metadata = project_gaussian_sequence(
+                gaussians_all_frame[0], physics_plan
+            )
+            gaussians_all_frame = projected.unsqueeze(0)
+            print(
+                "[HAT-4D] Applied unified Gaussian physics projection: "
+                f"representation={representation or 'free_deform'}, "
+                f"parameters={projection_metadata['parameters']}"
+            )
+
         out_paths: List[Path] = []
+        rigid_transforms = []
+        motion_reference = gaussians_all_frame[0, 0]
         for t in range(num_clip_frames):
             out_ply = session_root / "gs_sequence" / f"{int(target_frame_indices[t]):06d}.ply"
-            self._save_ply(gaussians_all_frame[:, t], out_ply)
+            if rigid_mode:
+                if t == 0:
+                    rotation = torch.eye(3, device=self.device, dtype=motion_reference.dtype)
+                    translation = torch.zeros(3, device=self.device, dtype=motion_reference.dtype)
+                else:
+                    opacity_weights = (
+                        motion_reference[:, 3].clamp_min(0)
+                        * gaussians_all_frame[0, t, :, 3].clamp_min(0)
+                    ).sqrt()
+                    rotation, translation = estimate_weighted_rigid_transform(
+                        motion_reference[:, 0:3],
+                        gaussians_all_frame[0, t, :, 0:3],
+                        opacity_weights,
+                    )
+                    rigid_frame = apply_rigid_transform_to_gaussians(
+                        canonical_gaussians, rotation, translation
+                    )
+                    self._save_ply(rigid_frame, out_ply)
+                rigid_transforms.append(
+                    {
+                        "frame": int(target_frame_indices[t]),
+                        "rotation": rotation.detach().float().cpu().tolist(),
+                        "translation": translation.detach().float().cpu().tolist(),
+                    }
+                )
+            else:
+                self._save_ply(gaussians_all_frame[:, t], out_ply)
             out_paths.append(out_ply)
+        if rigid_mode:
+            metadata_path = session_root / "preview" / "rigid_transforms.json"
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            metadata_path.write_text(json.dumps(rigid_transforms, indent=2))
+            print(
+                f"[HAT-4D] Rigid segment mode preserved {canonical_gaussians.shape[1]:,} "
+                f"canonical Gaussians; transforms saved to {metadata_path}"
+            )
+        elif projection_metadata is not None:
+            metadata_path = session_root / "preview" / "physics_projection.json"
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            for item, frame_index in zip(
+                projection_metadata["transforms"], target_frame_indices
+            ):
+                item["frame"] = int(frame_index)
+            metadata_path.write_text(json.dumps(projection_metadata, indent=2))
         return out_paths
 
     def generate_from_image(
@@ -813,6 +904,7 @@ class L4GMGenerator:
         session_root: Path,
         start_frame_idx: int,
         num_clip_frames: int,
+        physics_plan: Optional[Dict] = None,
     ) -> Dict:
         """Generate a multi-frame GS segment starting at start_frame_idx.
 
@@ -872,7 +964,9 @@ class L4GMGenerator:
         imageio.mimwrite(viz_dir / viz_name, (viz_ref_video * 255).clip(0, 255).astype(np.uint8), fps=10)
 
         # 3) Forward & save PLYs
-        out_paths = self._forward_and_save_segment(ref_video_arr, start_frame_idx, session_root, opt)
+        out_paths = self._forward_and_save_segment(
+            ref_video_arr, start_frame_idx, session_root, opt, physics_plan=physics_plan
+        )
 
         print_gpu_memory()
         return {
@@ -890,6 +984,7 @@ class L4GMGenerator:
         session_root: Path,
         start_frame_idx: int,
         num_clip_frames: int,
+        physics_plan: Optional[Dict] = None,
     ) -> Dict:
         """Generate previous GS segment in reverse time order from current frame."""
         if num_clip_frames <= 0:
@@ -940,6 +1035,7 @@ class L4GMGenerator:
             target_frame_indices=target_frame_indices,
             session_root=session_root,
             opt=opt,
+            physics_plan=physics_plan,
         )
 
         generated_min = min(target_frame_indices)
@@ -1058,6 +1154,7 @@ class L4GMGenerator:
         total_clip_frames: int = 16,
         memory_bank_dir: Path | None = None,
         debug_ref_video: bool = False,
+        physics_plan: Optional[Dict] = None,
     ) -> Dict:
         if total_clip_frames <= 0:
             raise ValueError("total_clip_frames must be positive")
@@ -1134,12 +1231,32 @@ class L4GMGenerator:
             B, gaussians_all_frame.shape[0] // opt.batch_size, *gaussians_all_frame.shape[1:]
         )
 
+        projection_metadata = None
+        if physics_plan:
+            projected, projection_metadata = project_gaussian_sequence(
+                gaussians_all_frame[0], physics_plan
+            )
+            gaussians_all_frame = projected.unsqueeze(0)
+
         out_paths: List[Path] = []
         for t in range(num_generate_frames):
             clip_idx = num_memory_frames + t
             out_ply = session_root / "gs_sequence" / f"{start_frame_idx + t:06d}.ply"
             self._save_ply(gaussians_all_frame[:, clip_idx], out_ply)
             out_paths.append(out_ply)
+
+        if projection_metadata is not None:
+            metadata_path = session_root / "preview" / "physics_projection_memory.json"
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            for item, clip_index in zip(
+                projection_metadata["transforms"], range(opt.num_frames)
+            ):
+                item["clip_index"] = int(clip_index)
+                if clip_index >= num_memory_frames:
+                    item["frame"] = int(
+                        start_frame_idx + clip_index - num_memory_frames
+                    )
+            metadata_path.write_text(json.dumps(projection_metadata, indent=2))
 
         print_gpu_memory()
         return {

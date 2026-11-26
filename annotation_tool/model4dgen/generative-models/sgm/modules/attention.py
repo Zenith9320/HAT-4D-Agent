@@ -1,6 +1,7 @@
 # Modified by HAT-4D; see the subtree MODIFICATIONS.md.
 import logging
 import math
+import os
 from inspect import isfunction
 from typing import Any, Optional
 
@@ -188,11 +189,18 @@ class SelfAttention(nn.Module):
             q, k, v = qkv[0], qkv[1], qkv[2]  # B H L D
             x = torch.nn.functional.scaled_dot_product_attention(q, k, v)
             x = rearrange(x, "B H L D -> B L (H D)")
-        elif self.attn_mode == "xformers":
+        elif self.attn_mode == "xformers" and os.environ.get("HAT4D_DISABLE_XFORMERS", "0") != "1":
             qkv = rearrange(qkv, "B L (K H D) -> K B L H D", K=3, H=self.num_heads)
             q, k, v = qkv[0], qkv[1], qkv[2]  # B L H D
             x = xformers.ops.memory_efficient_attention(q, k, v)
             x = rearrange(x, "B L H D -> B L (H D)", H=self.num_heads)
+        elif self.attn_mode == "xformers":
+            qkv = rearrange(
+                qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads
+            )
+            q, k, v = qkv[0], qkv[1], qkv[2]
+            x = F.scaled_dot_product_attention(q, k, v)
+            x = rearrange(x, "B H L D -> B L (H D)")
         elif self.attn_mode == "math":
             qkv = rearrange(qkv, "B L (K H D) -> K B H L D", K=3, H=self.num_heads)
             q, k, v = qkv[0], qkv[1], qkv[2]  # B H L D
@@ -491,7 +499,15 @@ class MemoryEfficientCrossAttention(nn.Module):
         )
 
         # actually compute the attention, what we cannot get enough of
-        if version.parse(xformers.__version__) >= version.parse("0.0.21"):
+        if os.environ.get("HAT4D_DISABLE_XFORMERS", "0") == "1":
+            q_native = q.reshape(b, self.heads, q.shape[1], self.dim_head)
+            k_native = k.reshape(b, self.heads, k.shape[1], self.dim_head)
+            v_native = v.reshape(b, self.heads, v.shape[1], self.dim_head)
+            out = F.scaled_dot_product_attention(
+                q_native, k_native, v_native, attn_mask=mask
+            )
+            out = out.reshape(b * self.heads, out.shape[2], self.dim_head)
+        elif version.parse(xformers.__version__) >= version.parse("0.0.21"):
             # NOTE: workaround for
             # https://github.com/facebookresearch/xformers/issues/845
             max_bs = 32768

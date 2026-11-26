@@ -63,6 +63,7 @@ class HeadlessClient:
         verbose: bool = True,
     ) -> None:
         self.client_id = str(client_id)
+        self.is_headless = True
         self.camera = _Camera(
             position=np.asarray(position, dtype=np.float32),
             wxyz=np.asarray(wxyz, dtype=np.float32),

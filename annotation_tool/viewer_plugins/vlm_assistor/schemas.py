@@ -6,6 +6,60 @@ import re
 from typing import Any
 
 
+PHYSICS_REPRESENTATIONS = {"rigid", "articulated", "elastic", "cloth", "free_deform"}
+
+
+def normalize_physics_plan(payload: dict[str, Any] | None) -> dict[str, Any]:
+    raw = dict(payload or {})
+    representation = str(raw.get("representation", "free_deform")).strip().lower()
+    if representation not in PHYSICS_REPRESENTATIONS:
+        representation = "free_deform"
+    try:
+        confidence = max(0.0, min(1.0, float(raw.get("confidence", 0.0))))
+    except Exception:
+        confidence = 0.0
+    constraints_raw = raw.get("constraints", {})
+    constraints = {}
+    if isinstance(constraints_raw, dict):
+        for key, value in constraints_raw.items():
+            try:
+                constraints[str(key)] = max(0.0, min(1.0, float(value)))
+            except Exception:
+                continue
+    properties_raw = raw.get("physical_properties", {})
+    physical_properties = {}
+    if isinstance(properties_raw, dict):
+        for key in (
+            "rigidity",
+            "elasticity",
+            "articulatedness",
+            "sheet_likeness",
+            "topology_stability",
+            "deformation_observed",
+        ):
+            try:
+                physical_properties[key] = max(0.0, min(1.0, float(properties_raw.get(key, 0.0))))
+            except Exception:
+                physical_properties[key] = 0.0
+    return {
+        "version": 2,
+        "agent": str(raw.get("agent", "physics_planner")),
+        "object_name": str(raw.get("object_name", "object")).strip() or "object",
+        "representation": representation,
+        "confidence": confidence,
+        "constraints": constraints,
+        "physical_properties": physical_properties,
+        "allowed_motion": [str(x) for x in raw.get("allowed_motion", []) if str(x).strip()],
+        "forbidden_motion": [str(x) for x in raw.get("forbidden_motion", []) if str(x).strip()],
+        "contacts": list(raw.get("contacts", [])) if isinstance(raw.get("contacts", []), list) else [],
+        "reason": str(raw.get("reason", "")).strip(),
+        "tool": str(raw.get("tool", "physics.gaussian_constraint_project")),
+        "fallback": str(raw.get("fallback", "free_deform")),
+        "start_frame": int(raw.get("start_frame", 0) or 0),
+        "num_frames": max(1, int(raw.get("num_frames", 1) or 1)),
+    }
+
+
 @dataclass
 class RelationEdge:
     subject: str

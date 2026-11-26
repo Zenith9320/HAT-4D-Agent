@@ -9,7 +9,7 @@ from urllib.parse import unquote
 import numpy as np
 from PIL import Image, ImageDraw
 
-from ..schemas import normalize_temporal_scene_graph
+from ..schemas import normalize_physics_plan, normalize_temporal_scene_graph
 from ..skills import (
     Agent1SkillBundle,
     SKILL_SAM3D_ENSURE_SESSION,
@@ -33,6 +33,84 @@ class _AgentBase:
         self.vlm_client = vlm_client
         self.agent_name = str(agent_name)
 
+    @staticmethod
+    def _refine_color_grounded_points(
+        object_name: str,
+        image_rgb_u8: np.ndarray,
+        points: list[Any],
+        target_count: int,
+    ) -> list[Any]:
+        """Use a conservative color prior when the target name makes it explicit."""
+        name = str(object_name).lower()
+        if "黄色" not in name and "yellow" not in name:
+            return list(points)
+        rgb = np.asarray(image_rgb_u8)
+        if rgb.ndim != 3 or rgb.shape[2] < 3:
+            return list(points)
+        arr = rgb[:, :, :3].astype(np.int16, copy=False)
+        r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+        mask = (r >= 135) & (g >= 115) & (b <= 175) & ((r - b) >= 45) & ((g - b) >= 30)
+
+        # Keep interior pixels only so clicks do not land on antialiased edges.
+        interior = mask.copy()
+        for dy, dx in ((-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, 1)):
+            interior &= np.roll(mask, shift=(dy, dx), axis=(0, 1))
+        ys, xs = np.nonzero(interior)
+        if xs.size < 120:
+            return list(points)
+
+        # Select spatially spread interior samples, starting near the component center.
+        count = max(1, int(target_count))
+        candidates = np.column_stack((xs, ys)).astype(np.float64)
+        center = candidates.mean(axis=0)
+        chosen: list[np.ndarray] = [candidates[np.argmin(np.sum((candidates - center) ** 2, axis=1))]]
+        while len(chosen) < count:
+            distances = np.min(
+                np.stack([np.sum((candidates - p) ** 2, axis=1) for p in chosen], axis=0),
+                axis=0,
+            )
+            next_point = candidates[int(np.argmax(distances))]
+            if any(np.array_equal(next_point, p) for p in chosen):
+                break
+            chosen.append(next_point)
+        return [(int(round(p[0])), int(round(p[1]))) for p in chosen]
+
+    @staticmethod
+    def _color_mask_contract(
+        object_name: str,
+        image_rgb_u8: np.ndarray,
+        mask_bool: np.ndarray | None,
+    ) -> dict[str, Any]:
+        name = str(object_name).lower()
+        if ("黄色" not in name and "yellow" not in name) or mask_bool is None:
+            return {"applicable": False, "ok": False}
+        rgb = np.asarray(image_rgb_u8)
+        mask = np.asarray(mask_bool, dtype=bool)
+        if rgb.ndim != 3 or rgb.shape[2] < 3 or mask.ndim != 2:
+            return {"applicable": False, "ok": False}
+        h = min(int(rgb.shape[0]), int(mask.shape[0]))
+        w = min(int(rgb.shape[1]), int(mask.shape[1]))
+        arr = rgb[:h, :w, :3].astype(np.int16, copy=False)
+        mask = mask[:h, :w]
+        r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+        support = (r >= 135) & (g >= 115) & (b <= 175) & ((r - b) >= 45) & ((g - b) >= 30)
+        support_area = int(support.sum())
+        mask_area = int(mask.sum())
+        overlap = int((support & mask).sum())
+        recall = float(overlap / max(1, support_area))
+        area_ratio = float(mask_area / max(1, h * w))
+        return {
+            "applicable": bool(support_area >= 120),
+            "ok": bool(support_area >= 120 and recall >= 0.85 and 0.001 <= area_ratio <= 0.08),
+            "support": "yellow",
+            "support_area": support_area,
+            "mask_area": mask_area,
+            "overlap_area": overlap,
+            "support_recall": recall,
+            "mask_area_ratio": area_ratio,
+            "thresholds": {"min_support_recall": 0.85, "min_area_ratio": 0.001, "max_area_ratio": 0.08},
+        }
+
     def log(self, status: str, message: str) -> None:
         entry = AgentLogEntry(
             ts=datetime.now().strftime("%H:%M:%S"),
@@ -55,6 +133,110 @@ class _AgentBase:
             )
         except Exception:
             pass
+
+
+class PhysicsPlanningAgent(_AgentBase):
+    """Map semantic scene information to a bounded physical generation plan."""
+
+    def __init__(self, ctx, state, bridge, vlm_client) -> None:
+        super().__init__(ctx, state, bridge, vlm_client, agent_name="agent5_physics_planner")
+
+    @staticmethod
+    def _score(properties: dict[str, Any], key: str) -> float:
+        try:
+            return max(0.0, min(1.0, float(properties.get(key, 0.0))))
+        except Exception:
+            return 0.0
+
+    def run(self, *, start_frame: int, num_frames: int) -> dict[str, Any]:
+        with self.state.lock:
+            graph = dict(getattr(self.state, "scene_graph", {}) or {})
+            description = str(getattr(self.state, "object_description", "") or "")
+            targets = list(getattr(self.state, "agent1_targets", []) or [])
+            target_index = int(getattr(self.state, "agent1_target_index", 0))
+            backend_mode = str(getattr(self.state, "agent0_backend_mode", "local_openai_compatible"))
+        objects = [str(x) for x in graph.get("objects", []) if str(x).strip()]
+        selected_target = ""
+        if targets:
+            selected_target = str(targets[max(0, min(target_index, len(targets) - 1))]).strip()
+        object_name = selected_target or description.strip() or (objects[0] if objects else "object")
+        try:
+            inferred = self.vlm_client.infer_physical_properties(
+                object_name=object_name,
+                scene_graph=graph,
+                backend_mode=backend_mode,
+            ) if self.vlm_client is not None else {"ok": False, "reason": "vlm_client_missing"}
+        except Exception as exc:
+            inferred = {
+                "ok": False,
+                "reason": f"physical_property_inference_failed:{type(exc).__name__}:{exc}",
+            }
+        properties = dict(inferred.get("physical_properties", {}) or {}) if inferred.get("ok") else {}
+        rigidity = self._score(properties, "rigidity")
+        elasticity = self._score(properties, "elasticity")
+        articulatedness = self._score(properties, "articulatedness")
+        sheet_likeness = self._score(properties, "sheet_likeness")
+        deformation = self._score(properties, "deformation_observed")
+        confidence = self._score(properties, "confidence") if properties else 0.0
+
+        if articulatedness >= 0.65:
+            representation = "articulated"
+            allowed = ["translation", "rotation", "joint_motion"]
+            forbidden = ["bone_length_change", "topology_change"]
+            constraints = {"kinematic_chain": 1.0, "temporal_smoothness": 0.8, "contact": 0.85}
+        elif sheet_likeness >= 0.65 and rigidity < 0.65:
+            representation = "cloth"
+            allowed = ["translation", "rotation", "bending", "folding"]
+            forbidden = ["topology_change", "random_scale_change"]
+            constraints = {"topology": 1.0, "temporal_smoothness": 0.8, "contact": 0.8}
+        elif elasticity >= 0.6 and deformation >= 0.2:
+            representation = "elastic"
+            allowed = ["translation", "rotation", "stretch", "compression", "bending", "torsion"]
+            forbidden = ["topology_change", "fracture", "random_scale_change"]
+            constraints = {"topology": 1.0, "temporal_smoothness": 0.85, "contact": 0.8, "elasticity": 0.9}
+        elif rigidity >= 0.72 and deformation <= 0.35:
+            representation = "rigid"
+            allowed = ["translation", "rotation"]
+            forbidden = ["deformation", "scale_change", "topology_change"]
+            constraints = {"shape_preservation": 1.0, "scale_preservation": 1.0, "temporal_smoothness": 0.8}
+        else:
+            representation = "free_deform"
+            allowed = ["translation", "rotation", "deformation"]
+            forbidden = ["topology_change"]
+            constraints = {"temporal_smoothness": 0.65, "topology": 0.8}
+        evidence = str(properties.get("evidence", "")).strip()
+        reason = evidence or str(inferred.get("reason", "physical property inference unavailable"))
+
+        contacts = []
+        for edge in graph.get("relations", []):
+            if not isinstance(edge, dict):
+                continue
+            predicate = str(edge.get("predicate", "")).lower()
+            if any(x in predicate for x in ("hold", "grasp", "touch", "contact", "拿", "抓", "接触")):
+                contacts.append(dict(edge))
+
+        plan = normalize_physics_plan(
+            {
+                "agent": self.agent_name,
+                "object_name": object_name,
+                "representation": representation,
+                "confidence": confidence,
+                "constraints": constraints,
+                "physical_properties": properties,
+                "allowed_motion": allowed,
+                "forbidden_motion": forbidden,
+                "contacts": contacts,
+                "reason": reason,
+                "tool": "physics.gaussian_constraint_project",
+                "fallback": "free_deform",
+                "start_frame": int(start_frame),
+                "num_frames": int(num_frames),
+            }
+        )
+        with self.state.lock:
+            self.state.last_physics_plan = dict(plan)
+        self.log("ok", f"plan={representation},confidence={confidence:.2f},object={object_name}")
+        return {"ok": True, "plan": plan}
 
 
 class VideoUnderstandingAgent(_AgentBase):
@@ -106,6 +288,12 @@ class VideoUnderstandingAgent(_AgentBase):
             return []
         s = max(1, int(stride))
         return list(range(0, int(total), s))
+
+    @classmethod
+    def _auto_sample_indices(cls, total: int) -> list[int]:
+        if total <= 48:
+            return list(range(max(0, int(total))))
+        return cls._stride_sample_indices(total, stride=4)
 
     def _resolve_local_frame_dir_override(self) -> Path | None:
         with self.state.lock:
@@ -176,9 +364,10 @@ class VideoUnderstandingAgent(_AgentBase):
             tokens.append(tok)
             path_strs.append(str(p.resolve()))
 
-        # Auto mode (max_frames<=0): sample every 4 frames (~25% of total frames).
+        # Auto mode keeps short clips intact so brief interactions are not lost.
+        # Longer clips retain the previous stride sampling to bound VLM cost.
         if int(max_frames) <= 0:
-            keep = self._stride_sample_indices(len(items), stride=4)
+            keep = self._auto_sample_indices(len(items))
         else:
             keep = self._uniform_sample_indices(len(items), max_frames=max_frames)
         items = [items[i] for i in keep]
@@ -601,14 +790,27 @@ class ClickAgent(_AgentBase):
             neg_cov <= float(point_rule["negative_coverage_threshold"])
         )
         qwen_ok = bool(vlm_eval.get("evaluated", False)) and bool(vlm_eval.get("ok", False))
-        final_ok = bool(qwen_ok)
+        vlm_point_rule = {
+            "positive_coverage_threshold": 0.75,
+            "negative_coverage_threshold": 0.001,
+        }
+        vlm_point_ok = (pos_cov >= float(vlm_point_rule["positive_coverage_threshold"])) and (
+            neg_cov <= float(vlm_point_rule["negative_coverage_threshold"])
+        )
+        color_contract = self._color_mask_contract(object_name, frame_rgb_u8, mask_bool)
+        color_contract_ok = bool(point_ok) and bool(color_contract.get("ok", False))
+        final_ok = bool((qwen_ok and vlm_point_ok) or color_contract_ok)
 
         eva["ok_heuristic"] = bool(eva_heuristic.get("ok", False))
         eva["vlm_eval"] = dict(vlm_eval or {})
         eva["point_rule"] = dict(point_rule)
         eva["ok_point_rule"] = bool(point_ok)
         eva["ok_qwen"] = bool(qwen_ok)
-        eva["mode"] = "vlm_only_gate"
+        eva["vlm_point_rule"] = dict(vlm_point_rule)
+        eva["ok_vlm_point_rule"] = bool(vlm_point_ok)
+        eva["color_mask_contract"] = dict(color_contract)
+        eva["ok_color_contract"] = bool(color_contract_ok)
+        eva["mode"] = "vlm_or_deterministic_contract_gate"
         eva["ok_vlm"] = bool(vlm_eval.get("ok", False)) if bool(vlm_eval.get("evaluated", False)) else None
         eva["ok"] = bool(final_ok)
         eva["filtered_prompt"] = dict(filtered_prompt or {})
@@ -1061,6 +1263,9 @@ class ClickAgent(_AgentBase):
                 blocked_rel=blocked_positive_rel,
                 width=iw,
                 height=ih,
+            )
+            positive = self._refine_color_grounded_points(
+                str(object_name), frame_rgb_u8, positive, n_pos
             )
             negative, dropped_neg = self._filter_points_by_blacklist(
                 negative_raw,

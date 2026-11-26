@@ -20,6 +20,7 @@ import viser.transforms as tf
 from utils.image_utils import add_alpha_channel
 
 from .helpers import _ensure_sam3d_thirdparty_on_path, _overlay_mask_and_points
+from ..mask_selection import select_prompt_consistent_mask
 
 
 class SamMixin:
@@ -322,7 +323,7 @@ class SamMixin:
                     point_labels=labels,
                     multimask_output=True,
                 )
-                best = int(np.argmax(scores))
+                best = select_prompt_consistent_mask(masks, scores, points, labels)
                 mask = masks[best].astype(bool)
                 logits_best = logits[best]
             else:

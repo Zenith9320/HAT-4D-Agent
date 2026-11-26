@@ -13,6 +13,7 @@ from diffusers.configuration_utils import ConfigMixin
 from diffusers.models.modeling_utils import ModelMixin
 
 # require xformers!
+import os
 import xformers
 import xformers.ops
 
@@ -199,9 +200,12 @@ class MemoryEfficientCrossAttention(nn.Module):
         )
 
         # actually compute the attention, what we cannot get enough of
-        out = xformers.ops.memory_efficient_attention(
-            q, k, v, attn_bias=None, op=self.attention_op
-        )
+        if os.environ.get("HAT4D_DISABLE_XFORMERS", "0") == "1":
+            out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+        else:
+            out = xformers.ops.memory_efficient_attention(
+                q, k, v, attn_bias=None, op=self.attention_op
+            )
 
         if self.ip_dim > 0:
             k_ip, v_ip = map(
@@ -213,9 +217,12 @@ class MemoryEfficientCrossAttention(nn.Module):
                 (k_ip, v_ip),
             )
             # actually compute the attention, what we cannot get enough of
-            out_ip = xformers.ops.memory_efficient_attention(
-                q, k_ip, v_ip, attn_bias=None, op=self.attention_op
-            )
+            if os.environ.get("HAT4D_DISABLE_XFORMERS", "0") == "1":
+                out_ip = torch.nn.functional.scaled_dot_product_attention(q, k_ip, v_ip)
+            else:
+                out_ip = xformers.ops.memory_efficient_attention(
+                    q, k_ip, v_ip, attn_bias=None, op=self.attention_op
+                )
             out = out + self.ip_weight * out_ip
 
         out = (

@@ -12,6 +12,17 @@ SAM3D_URL="${SAM3D_URL:-http://127.0.0.1:8015}"
 
 export VLM_LOCAL_BASE_URL="${VLM_LOCAL_BASE_URL:-http://127.0.0.1:22003/v1}"
 export VLM_LOCAL_MODEL="${VLM_LOCAL_MODEL:-Qwen/Qwen3-VL-235B-A22B-Instruct}"
+export TMPDIR="${TMPDIR:-/data/hat4d/tmp}"
+export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-/data/hat4d/cache/torch-extensions/hat4d-frontend}"
+export CUDA_HOME="${CUDA_HOME:-/root/miniforge/envs/hat4d-roi}"
+export PATH="${CUDA_HOME}/bin:${PATH}"
+export CC="${CC:-${CUDA_HOME}/bin/x86_64-conda-linux-gnu-gcc}"
+export CXX="${CXX:-${CUDA_HOME}/bin/x86_64-conda-linux-gnu-g++}"
+export MAX_JOBS="${MAX_JOBS:-1}"
+export CPLUS_INCLUDE_PATH="${CUDA_HOME}/targets/x86_64-linux/include${CPLUS_INCLUDE_PATH:+:${CPLUS_INCLUDE_PATH}}"
+export LIBRARY_PATH="${CUDA_HOME}/targets/x86_64-linux/lib${LIBRARY_PATH:+:${LIBRARY_PATH}}"
+export LD_LIBRARY_PATH="${CUDA_HOME}/targets/x86_64-linux/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+mkdir -p "${TMPDIR}" "${TORCH_EXTENSIONS_DIR}"
 
 args=(
   --http-get-retries 2

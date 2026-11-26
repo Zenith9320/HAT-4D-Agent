@@ -5,6 +5,17 @@ TOOL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROI_HOST="${ROI_HOST:-127.0.0.1}"
 ROI_PORT="${ROI_PORT:-8002}"
 INIT_SV4D="${INIT_SV4D:-1}"
+HAT4D_SV4D_PUBLIC_COMPAT="${HAT4D_SV4D_PUBLIC_COMPAT:-0}"
+HAT4D_DATA_ROOT="${HAT4D_DATA_ROOT:-/data/hat4d}"
+
+if [[ -z "${MVDREAM_MODEL_PATH:-}" ]]; then
+  DEFAULT_MVDREAM_PATH="${HAT4D_DATA_ROOT}/checkpoints/imagedream-ipmv-diffusers"
+  if [[ -f "${DEFAULT_MVDREAM_PATH}/model_index.json" ]]; then
+    export MVDREAM_MODEL_PATH="${DEFAULT_MVDREAM_PATH}"
+  fi
+fi
+export MVDREAM_CACHE_DIR="${MVDREAM_CACHE_DIR:-${HAT4D_DATA_ROOT}/cache/huggingface}"
+export MVDREAM_LOCAL_FILES_ONLY="${MVDREAM_LOCAL_FILES_ONLY:-1}"
 
 cd "${TOOL_ROOT}"
 
@@ -14,10 +25,19 @@ if [[ "${SKIP_MODEL_CHECKS:-0}" != "1" ]]; then
     echo "L4GM checkpoint not found: ${L4GM_WEIGHT}" >&2
     exit 2
   fi
+  if [[ -n "${MVDREAM_MODEL_PATH:-}" && ! -f "${MVDREAM_MODEL_PATH}/model_index.json" ]]; then
+    echo "MVDream model is incomplete or missing: ${MVDREAM_MODEL_PATH}" >&2
+    exit 2
+  fi
   if [[ "${INIT_SV4D}" == "1" ]]; then
     SV4D_WEIGHT="${SV4D_CHECKPOINT:-${TOOL_ROOT}/model4dgen/generative-models/checkpoints/sv4d2.0/sv4d2_with_first_stage_encoder_v2.safetensors}"
     if [[ ! -f "${SV4D_WEIGHT}" ]]; then
       echo "SV4D checkpoint not found: ${SV4D_WEIGHT}" >&2
+      exit 2
+    fi
+    if [[ "$(basename "${SV4D_WEIGHT}")" == "sv4d2.safetensors" && "${HAT4D_SV4D_PUBLIC_COMPAT}" != "1" ]]; then
+      echo "Official sv4d2.safetensors requires HAT4D_SV4D_PUBLIC_COMPAT=1." >&2
+      echo "This mode is approximate and does not reproduce the unpublished HAT-4D variant." >&2
       exit 2
     fi
   fi

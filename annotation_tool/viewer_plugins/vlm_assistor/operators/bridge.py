@@ -567,6 +567,12 @@ class Sam3DOperatorBridge:
         if isinstance(headless, np.ndarray):
             return self._ensure_rgb_u8(headless)
 
+        if bool(getattr(client, "is_headless", False)):
+            raise RuntimeError(
+                "headless_render_unavailable: install gsplat in the frontend environment "
+                "and ensure its CUDA extension can load"
+            )
+
         last_exc: Exception | None = None
         capture_fn = getattr(app, "_capture_clean_render", None)
         if callable(capture_fn):

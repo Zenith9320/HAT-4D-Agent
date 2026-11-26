@@ -162,6 +162,20 @@ Stability AI 公开的 `sv4d2.safetensors` 是上游基础模型，不能替代�
 定制权重。认证 token 不得写入仓库；使用前还需检查 L4GM、SAM、SAM3D、
 SV4D 和 Qwen 各自的模型许可。
 
+如仅需在私有 variant 发布前评估公开代码，可显式启用实验性的公开权重兼容
+模式。该模式把官方 SV4D2 已训练的条件 VAE encoder 复制到 HAT-4D 新增的
+`cond_view`、`cond_motion` 和 first-stage encoder 分支，并拒绝任何核心扩散
+网络缺权重的 checkpoint。结果是近似基线，不等同于论文或作者 variant：
+
+```bash
+hf download stabilityai/sv4d2.0 sv4d2.safetensors \
+  --local-dir /data/hat4d/checkpoints/sv4d2-official
+
+export SV4D_CHECKPOINT=/data/hat4d/checkpoints/sv4d2-official/sv4d2.safetensors
+export HAT4D_SV4D_PUBLIC_COMPAT=1
+annotation_tool/scripts/start_roi_backend.sh
+```
+
 ## 5. 准备标注 case
 
 输入帧直接放在 `input` 目录下，推荐使用六位补零文件名：
@@ -320,3 +334,18 @@ python annotation_tool/viewer_plugins/sam3d_gen/backend.py --health-only --port 
 - `/v1/models` 正常但 Qwen 请求失败：把 `VLM_LOCAL_MODEL` 改为接口返回的准确 ID。
 - 浏览器能打开但后端操作失败：确认端口一致，且进程运行在同一主机。
 - 续标后场景为空：确认 `RESUME_WORKSPACE` 指向具体时间戳工作区。
+### Agent 物理约束投影
+
+4D segment 生成前，`PhysicsPlanningAgent` 会通过当前 VLM 推断连续物理属性：刚性、弹性、
+关节性、薄片性、拓扑稳定性和已观察形变。`rigid`、`elastic`、`cloth`、`articulated`
+和 `free_deform` 是便于查看的标签；后端不会按物体名称使用五套特例代码，而是把这些属性
+转换成统一 Gaussian 投影器的连续参数。
+
+每个 session 会保存：
+
+- `generation_plan.json`：Agent 的物理属性、约束和判断依据。
+- `preview/physics_projection.json`：普通/反向 segment 的实际投影参数与逐帧整体变换。
+- `preview/physics_projection_memory.json`：memory-aware segment 的投影记录。
+
+Agent 或 VLM 暂时不可用时，计划置信度为零，投影器保持 L4GM 原始输出，不会阻断生成。
+旧的 `HAT4D_RIGID_SEGMENTS=1` 仍保留为强制刚体兼容开关；正常使用时不应设置该变量。

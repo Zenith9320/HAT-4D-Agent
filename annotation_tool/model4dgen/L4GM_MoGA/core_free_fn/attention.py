@@ -20,7 +20,10 @@ from xformers.ops  import  memory_efficient_attention, unbind
 from xformers.ops import fmha
 import xformers.ops as xops
 
-XFORMERS_ENABLED = os.environ.get("XFORMERS_DISABLED") is None
+XFORMERS_ENABLED = (
+    os.environ.get("XFORMERS_DISABLED") is None
+    and os.environ.get("HAT4D_DISABLE_XFORMERS", "0") != "1"
+)
 try:
     if XFORMERS_ENABLED:
         from xformers.ops  import memory_efficient_attention, unbind
@@ -112,7 +115,17 @@ class MemEffAttention(Attention):
         if return_attn :
             print("MemEffAttention Return Will Atten")
             pass
-        if (not XFORMERS_AVAILABLE) or return_attn or zero_out_cross_frame:
+        if (not XFORMERS_AVAILABLE) and not return_attn and not zero_out_cross_frame:
+            if attn_bias is not None:
+                raise AssertionError("xFormers is required for using nested tensors")
+            B, N, C = x.shape
+            qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+            q, k, v = qkv.unbind(2)
+            q, k, v = (t.transpose(1, 2) for t in (q, k, v))
+            x = F.scaled_dot_product_attention(q, k, v)
+            x = x.transpose(1, 2).reshape(B, N, C)
+            return self.proj_drop(self.proj(x))
+        if return_attn or zero_out_cross_frame:
             if attn_bias is not None:
                 raise AssertionError("xFormers is required for using nested tensors")
             return super().forward(x, return_attn=return_attn, num_frames=num_frames, zero_out_cross_frame=zero_out_cross_frame)

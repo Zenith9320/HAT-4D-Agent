@@ -120,7 +120,7 @@ def build_defaults(app: Any | None = None) -> VLMAssistorDefaults:
     return VLMAssistorDefaults(
         relation_hint=os.getenv("VLM_RELATION_HINT") or DEFAULT_RELATION_HINT,
         agent0_backend_mode=backend_mode,
-        # 0 means auto-sampling by stride (default: every 4 frames -> ~25% frames).
+        # 0 keeps clips up to 48 frames intact, then samples every 4 frames.
         agent0_max_frames=max(0, _safe_int(os.getenv("VLM_AGENT0_MAX_FRAMES"), 0)),
         agent0_render_size=max(128, _safe_int(os.getenv("VLM_AGENT0_RENDER_SIZE"), 384)),
         agent0_local_base_url=os.getenv("VLM_LOCAL_BASE_URL") or DEFAULT_LOCAL_VLM_BASE_URL,

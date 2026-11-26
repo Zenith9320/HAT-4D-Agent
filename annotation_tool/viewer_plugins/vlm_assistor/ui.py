@@ -102,7 +102,7 @@ class VLMAssistorUI:
                 max=50,
                 step=1,
                 initial_value=int(self.state.agent0_max_frames),
-                hint="0 = auto (every 4 frames pick 1, ~25% of total). >0 = explicit max sampled frames.",
+                hint="0 = auto (all frames for clips up to 48 frames; longer clips use stride 4). >0 = explicit max sampled frames.",
             )
             self.agent0_render_size = client.gui.add_slider(
                 "Agent0 render size",

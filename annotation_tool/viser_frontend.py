@@ -1749,13 +1749,25 @@ class ViewerApp:
             self._ensure_session(client)
             session_status.value = f"state=generating next {num_frames} from {start_frame}"
             self._start_metric_poll(client)
+            physics_plan = None
+            physics_ops = getattr(getattr(self, "vlm_assistor_plugin", None), "ops", None)
+            plan_fn = getattr(physics_ops, "plan_physics_for_segment_sync", None)
+            if callable(plan_fn):
+                try:
+                    planned = plan_fn(start_frame=int(start_frame), num_frames=int(num_frames))
+                    physics_plan = dict(planned.get("plan", {}) or {})
+                except Exception as exc:
+                    print(f"[PhysicsPlanningAgent] fallback: {type(exc).__name__}: {exc}")
+            payload = {
+                "session_id": self.session_id,
+                "num_frames": int(num_frames),
+                "start_frame": int(start_frame),
+            }
+            if physics_plan:
+                payload["physics_plan"] = physics_plan
             resp = self._post_json(
                 self._backend_base_url() + "/generate/later_gen",
-                {
-                    "session_id": self.session_id,
-                    "num_frames": int(num_frames),
-                    "start_frame": int(start_frame),
-                },
+                payload,
                 timeout=600,
             )
             if resp.get("status") != "success":
@@ -1807,6 +1819,12 @@ class ViewerApp:
                 auto_close_seconds=8,
             )
             self._run_auto_vlm_eval_for_frames(client, range(start, end + 1))
+            critic_fn = getattr(physics_ops, "run_4d_validator", None)
+            if callable(critic_fn) and os.environ.get("HAT4D_AGENT_CRITIC", "1") == "1":
+                try:
+                    critic_fn(client, window_size=max(1, end - start), frame_idx=end)
+                except Exception as exc:
+                    print(f"[PhysicsCriticAgent] fallback: {type(exc).__name__}: {exc}")
             return start, end
 
         def _run_generate_last_segment(start_frame: int, num_frames: int) -> tuple[int, int]:
@@ -1817,13 +1835,25 @@ class ViewerApp:
                 f"state=generating previous {num_frames} from {start_frame} (reverse)"
             )
             self._start_metric_poll(client)
+            physics_plan = None
+            physics_ops = getattr(getattr(self, "vlm_assistor_plugin", None), "ops", None)
+            plan_fn = getattr(physics_ops, "plan_physics_for_segment_sync", None)
+            if callable(plan_fn):
+                try:
+                    planned = plan_fn(start_frame=int(start_frame), num_frames=int(num_frames))
+                    physics_plan = dict(planned.get("plan", {}) or {})
+                except Exception as exc:
+                    print(f"[PhysicsPlanningAgent] backward fallback: {type(exc).__name__}: {exc}")
+            payload = {
+                "session_id": self.session_id,
+                "num_frames": int(num_frames),
+                "start_frame": int(start_frame),
+            }
+            if physics_plan:
+                payload["physics_plan"] = physics_plan
             resp = self._post_json(
                 self._backend_base_url() + "/generate/last_segment",
-                {
-                    "session_id": self.session_id,
-                    "num_frames": int(num_frames),
-                    "start_frame": int(start_frame),
-                },
+                payload,
                 timeout=600,
             )
             if resp.get("status") != "success":
@@ -1955,15 +1985,30 @@ class ViewerApp:
                 f"future={int(total_clip_frames) - len(memory_indices)} from {start_frame}"
             )
             self._start_metric_poll(client)
+            physics_plan = None
+            physics_ops = getattr(getattr(self, "vlm_assistor_plugin", None), "ops", None)
+            plan_fn = getattr(physics_ops, "plan_physics_for_segment_sync", None)
+            if callable(plan_fn):
+                try:
+                    planned = plan_fn(
+                        start_frame=int(start_frame),
+                        num_frames=max(1, int(total_clip_frames) - len(memory_indices)),
+                    )
+                    physics_plan = dict(planned.get("plan", {}) or {})
+                except Exception as exc:
+                    print(f"[PhysicsPlanningAgent] memory fallback: {type(exc).__name__}: {exc}")
+            payload = {
+                "session_id": self.session_id,
+                "start_frame": int(start_frame),
+                "total_clip_frames": int(total_clip_frames),
+                "memory_frame_indices": [int(i) for i in memory_indices],
+                "debug_ref_video": bool(memory_debug_checkbox.value),
+            }
+            if physics_plan:
+                payload["physics_plan"] = physics_plan
             resp = self._post_json(
                 self._backend_base_url() + "/generate/later_gen_with_memory",
-                {
-                    "session_id": self.session_id,
-                    "start_frame": int(start_frame),
-                    "total_clip_frames": int(total_clip_frames),
-                    "memory_frame_indices": [int(i) for i in memory_indices],
-                    "debug_ref_video": bool(memory_debug_checkbox.value),
-                },
+                payload,
                 timeout=900,
             )
             if resp.get("status") != "success":

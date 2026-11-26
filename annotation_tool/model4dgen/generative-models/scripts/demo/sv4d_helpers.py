@@ -1782,6 +1782,30 @@ def load_model(
     compile_unet: bool = False,
 ):
     config = OmegaConf.load(config)
+    if os.environ.get("HAT4D_DISABLE_XFORMERS", "0") == "1":
+        replacements = {
+            "softmax-xformers": "softmax",
+            "vanilla-xformers": "vanilla",
+        }
+
+        def replace_attention_modes(node):
+            if OmegaConf.is_dict(node):
+                for key in list(node.keys()):
+                    value = node[key]
+                    if isinstance(value, str) and value in replacements:
+                        node[key] = replacements[value]
+                    else:
+                        replace_attention_modes(value)
+            elif OmegaConf.is_list(node):
+                for index in range(len(node)):
+                    value = node[index]
+                    if isinstance(value, str) and value in replacements:
+                        node[index] = replacements[value]
+                    else:
+                        replace_attention_modes(value)
+
+        replace_attention_modes(config)
+        print("[HAT-4D] xFormers attention disabled; using PyTorch native attention")
     if device == "cuda":
         config.model.params.conditioner_config.params.emb_models[
             0

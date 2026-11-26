@@ -676,6 +676,14 @@ class SessionManager:
         # Update state to generating.
         record["state"] = "generating"
         record["error"] = None
+        physics_plan = payload.get("physics_plan") if isinstance(payload.get("physics_plan"), dict) else {}
+        if not physics_plan:
+            physics_plan = dict(record.get("physics_plan") or {})
+        if physics_plan:
+            record["physics_plan"] = physics_plan
+            (session_root / "generation_plan.json").write_text(
+                json.dumps(physics_plan, indent=2, ensure_ascii=False)
+            )
         self._save_record(session_root, record)
 
         input_dir = Path(record.get("input_dir"))
@@ -747,6 +755,14 @@ class SessionManager:
 
         record["state"] = "generating"
         record["error"] = None
+        physics_plan = payload.get("physics_plan") if isinstance(payload.get("physics_plan"), dict) else {}
+        if not physics_plan:
+            physics_plan = dict(record.get("physics_plan") or {})
+        if physics_plan:
+            record["physics_plan"] = physics_plan
+            (session_root / "generation_plan.json").write_text(
+                json.dumps(physics_plan, indent=2, ensure_ascii=False)
+            )
         self._save_record(session_root, record)
 
         # Start from the current frame (default 0) so the existing seed GS can be reused.
@@ -772,6 +788,7 @@ class SessionManager:
             session_root,
             start_idx,
             num_clip_frames,
+            physics_plan=physics_plan,
         )
 
         record["state"] = "reviewing"
@@ -789,6 +806,7 @@ class SessionManager:
             "mv_preview_dir": result.get("mv_preview_dir"),
             "state": record["state"],
             "metrics": metrics_result,
+            "physics_plan": physics_plan,
         }
 
     def generate_last(self, payload: Dict) -> Dict:
@@ -805,6 +823,14 @@ class SessionManager:
 
         record["state"] = "generating"
         record["error"] = None
+        physics_plan = payload.get("physics_plan") if isinstance(payload.get("physics_plan"), dict) else {}
+        if not physics_plan:
+            physics_plan = dict(record.get("physics_plan") or {})
+        if physics_plan:
+            record["physics_plan"] = physics_plan
+            (session_root / "generation_plan.json").write_text(
+                json.dumps(physics_plan, indent=2, ensure_ascii=False)
+            )
         self._save_record(session_root, record)
 
         start_idx = int(payload.get("start_frame", record.get("current_frame", 0)))
@@ -830,6 +856,7 @@ class SessionManager:
             session_root,
             start_idx,
             len(slice_frames),
+            physics_plan=physics_plan,
         )
 
         generated_indices = [int(i) for i in (result.get("generated_frame_indices") or target_indices)]
@@ -852,6 +879,7 @@ class SessionManager:
             "mv_preview_dir": result.get("mv_preview_dir"),
             "state": record["state"],
             "metrics": metrics_result,
+            "physics_plan": physics_plan,
         }
 
     def _resolve_memory_frame_indices(
@@ -981,6 +1009,14 @@ class SessionManager:
 
         record["state"] = "generating"
         record["error"] = None
+        physics_plan = payload.get("physics_plan") if isinstance(payload.get("physics_plan"), dict) else {}
+        if not physics_plan:
+            physics_plan = dict(record.get("physics_plan") or {})
+        if physics_plan:
+            record["physics_plan"] = physics_plan
+            (session_root / "generation_plan.json").write_text(
+                json.dumps(physics_plan, indent=2, ensure_ascii=False)
+            )
         self._save_record(session_root, record)
 
         start_idx = int(payload.get("start_frame", record.get("current_frame", 0)))
@@ -1036,6 +1072,7 @@ class SessionManager:
             total_clip_frames=total_clip_frames,
             memory_bank_dir=memory_bank_dir,
             debug_ref_video=debug_ref_video,
+            physics_plan=physics_plan,
         )
 
         ply_paths = result.get("ply_paths", []) or []
@@ -1070,6 +1107,7 @@ class SessionManager:
             "debug_ref_video_path": result.get("debug_ref_video_path"),
             "state": record["state"],
             "metrics": metrics_result,
+            "physics_plan": physics_plan,
         }
 
     # --- Multi-view rendering (backend) ---------------------------------

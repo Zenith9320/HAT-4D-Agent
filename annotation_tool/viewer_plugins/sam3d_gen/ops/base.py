@@ -280,7 +280,6 @@ class Sam3DGenOpsBase:
             flip_udlr = bool(getattr(app, "flip_colmap", True))
             self.state.image_flip_udlr = flip_udlr
             print("flip_udlr:", flip_udlr)
-            flip_udlr = True
             image_rgb, alpha_u8 = _load_rgb_alpha_u8(img_path, flip_udlr=flip_udlr)
             print("image_path:", img_path)
             self.state.pad_info = None

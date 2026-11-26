@@ -4,6 +4,7 @@ from .core import (
     Gen3DValidatorAgent,
     PoseAdjusterAgent,
     PoseAdjusterAgentV2,
+    PhysicsPlanningAgent,
     VideoUnderstandingAgent,
 )
 from .fourd_memory import FourDMemoryJudgeAgent
@@ -15,6 +16,7 @@ __all__ = [
     "Gen3DValidatorAgent",
     "PoseAdjusterAgent",
     "PoseAdjusterAgentV2",
+    "PhysicsPlanningAgent",
     "FourDValidatorAgent",
     "FourDMemoryJudgeAgent",
     "MemoryFrameSelector",

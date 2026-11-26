@@ -229,3 +229,42 @@ test
 # HAT-4D runtime output
 /results/
 results/**
+
+# Local datasets and experiment cases
+/asset/demo_case_3/
+/data/
+/datasets/
+
+# Model weights, local model repositories, and checkpoint links
+/annotation_tool/checkpoints/
+/annotation_tool/model4dgen/L4GM_MoGA/pretrained
+/annotation_tool/model4dgen/generative-models/checkpoints/
+/annotation_tool/viewer_plugins/sam3d_gen/thirdparty/sam-3d-objects/
+/annotation_tool/viewer_plugins/vlm_assistor/thirdparty/Qwen3-VL/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# Generated workspaces and reconstruction artifacts
+workspace/
+workspace_*/
+**/workspace_*/
+outputs/
+debug/
+logs/
+*.ply
+
+# Local caches and compiled extensions
+cache/
+**/.cache/
+**/__pycache__/
+build.ninja
+*.ninja
+
+# Local credentials and machine-specific configuration
+.env.*
+!.env.example
+*.token
+*.key
+.DS_Store
